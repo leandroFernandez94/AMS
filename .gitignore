@@ -15,6 +15,10 @@ pnpm-debug.log*
 dist/
 build/
 coverage/
+*.tsbuildinfo
+
+# SDD local artifacts
+.atl/
 
 # OS / Editor
 .DS_Store
