@@ -1,29 +1,29 @@
 /**
- * Contrato de datos de una decision note — el tipo canónico de nota
- * del tracer bullet. Toda otra spec (Write API, MCP, QMD) lee y
- * escribe contra este contrato.
+ * Data contract for a decision note — the canonical note type of the
+ * tracer bullet. Every other spec (Write API, MCP, QMD) reads and
+ * writes against this contract.
  *
- * Decisiones de diseño (ver issue #2):
- *  - Formato canónico determinístico: `parseNote()` acepta cualquier
- *    nota bien formada y `serializeNote()` siempre emite el mismo
- *    formato. Round-trip estable:
+ * Design decisions (see issue #2):
+ *  - Deterministic canonical format: `parseNote()` accepts any
+ *    well-formed note and `serializeNote()` always emits the same
+ *    form. Stable round-trip:
  *      serializeNote(parseNote(serializeNote(parseNote(x))))
  *        === serializeNote(parseNote(x))
- *  - Las secciones H2 canónicas son Context / Decision / Consequences.
- *    Secciones extra se preservan verbatim para no perder contenido.
- *  - Wikilinks `[[target]]` se extraen para validación, pero la política
- *    del sistema es NO materializar stubs para links rotos (ver
- *    architecture constraints de AMS).
+ *  - Canonical H2 sections are Context / Decision / Consequences.
+ *    Extra sections are preserved verbatim so no content is lost.
+ *  - Wikilinks `[[target]]` are extracted for validation, but the
+ *    system policy is to NEVER materialize stubs for broken links
+ *    (see the AMS architecture constraints).
  */
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { deriveId, isIsoDate, slugify } from "./slug.js";
 
 // ---------------------------------------------------------------------------
-// Errores
+// Errors
 // ---------------------------------------------------------------------------
 
-/** Error de parseo de nota. Distinto tipo para distinguirlo en tests/catch. */
+/** Error type for note parsing failures. Distinct type for tests/catch blocks. */
 export class NoteParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -32,16 +32,16 @@ export class NoteParseError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// Schema de frontmatter
+// Frontmatter schema
 // ---------------------------------------------------------------------------
 
 export const DecisionStatus = z.enum(["proposed", "accepted", "superseded", "deprecated"]);
 export type DecisionStatus = z.infer<typeof DecisionStatus>;
 
-/** Id canónico: <YYYY-MM-DD>-<slug>. Validado para garantizar idempotencia. */
+/** Canonical id: <YYYY-MM-DD>-<slug>. Validated to guarantee idempotency. */
 const ID_RE = /^\d{4}-\d{2}-\d{2}-[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** topic_key opcional: path en minúsculas separado por `/`. */
+/** Optional topic_key: lowercase path separated by `/`. */
 const TOPIC_KEY_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 
 export const FrontmatterSchema = z.object({
@@ -56,7 +56,7 @@ export const FrontmatterSchema = z.object({
 export type Frontmatter = z.infer<typeof FrontmatterSchema>;
 
 // ---------------------------------------------------------------------------
-// Secciones del body
+// Body sections
 // ---------------------------------------------------------------------------
 
 export const SECTION_ORDER = ["Context", "Decision", "Consequences"] as const;
@@ -67,30 +67,30 @@ export interface ExtraSection {
   body: string;
 }
 
-/** Nota parseada. Las secciones canónicas están garantizadas presentes. */
+/** Parsed note. Canonical sections are guaranteed to be present. */
 export interface DecisionNote {
   frontmatter: Frontmatter;
   sections: Record<SectionName, string>;
-  /** Contenido libre antes del primer H2 (preservado verbatim, suele ser vacío). */
+  /** Free-form content before the first H2 (preserved verbatim, usually empty). */
   preface: string;
-  /** Secciones H2 no canónicas, preservadas en orden de aparición. */
+  /** Non-canonical H2 sections, preserved in order of appearance. */
   extraSections: ExtraSection[];
-  /** Targets de wikilinks encontrados en el body. Solo para validación. */
+  /** Wikilink targets found in the body. For validation only. */
   wikilinks: string[];
 }
 
 // ---------------------------------------------------------------------------
-// Path en el vault
+// Vault path
 // ---------------------------------------------------------------------------
 
 export const DECISIONS_DIR = "decisions";
 
-/** Path canónico de una nota a partir de su id: `decisions/<id>.md`. */
+/** Canonical path of a note from its id: `decisions/<id>.md`. */
 export function notePath(id: string): string {
   return `${DECISIONS_DIR}/${id}.md`;
 }
 
-/** Construye una nota nueva garantizando coherencia id/date/slug. */
+/** Builds a new note, guaranteeing id/date/slug coherence. */
 export function buildNote(input: {
   title: string;
   date: string;
@@ -124,7 +124,7 @@ export function buildNote(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Parseo
+// Parsing
 // ---------------------------------------------------------------------------
 
 interface SplitDoc {
@@ -132,7 +132,7 @@ interface SplitDoc {
   body: string;
 }
 
-/** Separa el bloque `--- ... ---` del cuerpo markdown. */
+/** Splits the `--- ... ---` block from the markdown body. */
 function splitFrontmatter(source: string): SplitDoc {
   const trimmed = source.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(trimmed);
@@ -147,7 +147,7 @@ interface SplitBody {
   sections: Map<string, string>;
 }
 
-/** Parte el cuerpo por headers H2. Preserva todo el contenido textual. */
+/** Splits the body by H2 headers. Preserves all textual content. */
 function splitBody(body: string): SplitBody {
   const lines = body.split("\n");
   const sections = new Map<string, string>();
@@ -180,7 +180,7 @@ function splitBody(body: string): SplitBody {
 
 const WIKILINK_RE = /\[\[([^[\]|]+)(?:\|[^[\]]+)?\]\]/g;
 
-/** Extrae targets únicos de wikilinks `[[target]]` o `[[target|alias]]`. */
+/** Extracts unique targets from `[[target]]` or `[[target|alias]]` wikilinks. */
 export function extractWikilinks(text: string): string[] {
   const seen = new Set<string>();
   for (const m of text.matchAll(WIKILINK_RE)) {
@@ -191,11 +191,11 @@ export function extractWikilinks(text: string): string[] {
 }
 
 /**
- * Parsea una decision note desde su fuente markdown.
+ * Parses a decision note from its markdown source.
  *
- * Lanza `NoteParseError` ante frontmatter faltante/inválido o secciones
- * canónicas ausentes. Errores de schema (Zod) se envuelven en NoteParseError
- * para un único tipo de error de parseo.
+ * Throws `NoteParseError` on missing/invalid frontmatter or missing
+ * canonical sections. Schema (Zod) errors are wrapped in NoteParseError
+ * so there is a single parse error type.
  */
 export function parseNote(source: string): DecisionNote {
   const { frontmatterRaw, body } = splitFrontmatter(source);
@@ -250,15 +250,15 @@ export function parseNote(source: string): DecisionNote {
 }
 
 // ---------------------------------------------------------------------------
-// Serialización (canónica)
+// Serialization (canonical)
 // ---------------------------------------------------------------------------
 
 /**
- * Serializa una nota a su forma canónica determinística.
+ * Serializes a note into its deterministic canonical form.
  *
- * Garantiza: mismo orden de keys, LF, secciones en SECTION_ORDER seguidas
- * de extras, y bloques separados por una sola línea en blanco. Es la base
- * del contrato de idempotencia de upserts.
+ * Guarantees: fixed key order, LF line endings, sections in SECTION_ORDER
+ * followed by extras, and blocks separated by a single blank line. This
+ * is the basis of the upsert idempotency contract.
  */
 export function serializeNote(note: DecisionNote): string {
   const frontmatter = serializeFrontmatter(note.frontmatter);
@@ -281,7 +281,7 @@ export function serializeNote(note: DecisionNote): string {
   return `${blocks.join("\n\n")}\n`;
 }
 
-/** Serializa el frontmatter en orden de keys fijo para diffs estables. */
+/** Serializes frontmatter with a fixed key order for stable diffs. */
 function serializeFrontmatter(fm: Frontmatter): string {
   const ordered: Record<string, unknown> = {
     id: fm.id,
@@ -298,12 +298,12 @@ function serializeFrontmatter(fm: Frontmatter): string {
 }
 
 // ---------------------------------------------------------------------------
-// Validación de coherencia (idempotencia)
+// Coherence validation (idempotency)
 // ---------------------------------------------------------------------------
 
 /**
- * Verifica que el id, fecha y título de una nota sean coherentes
- * (id === deriveId(title, date)). Útil en el Write API antes de persistir.
+ * Verifies that a note's id, date and title are coherent
+ * (id === deriveId(title, date)). Useful in the Write API before persisting.
  */
 export function isCoherent(note: DecisionNote): boolean {
   const { id, title, date } = note.frontmatter;

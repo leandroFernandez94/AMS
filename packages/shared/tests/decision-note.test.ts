@@ -49,14 +49,14 @@ describe("deriveId", () => {
   });
 
   it("is deterministic for the same (title, date) pair", () => {
-    const a = deriveId("Mismo título", "2026-07-01");
-    const b = deriveId("Mismo título", "2026-07-01");
+    const a = deriveId("Same title", "2026-07-01");
+    const b = deriveId("Same title", "2026-07-01");
     expect(a).toBe(b);
   });
 
   it("throws on non-ISO date", () => {
     expect(() => deriveId("x", "2026/07/01")).toThrow(/Invalid ISO date/);
-    expect(() => deriveId("x", "2026-13-01")).not.toThrow(); // formato válido, rango fuera de scope
+    expect(() => deriveId("x", "2026-13-01")).not.toThrow(); // valid format, range out of scope
   });
 
   it("throws when title yields an empty slug", () => {
@@ -87,15 +87,15 @@ tags:
 
 ## Context
 
-Necesitamos recuperar decisiones pasadas. Los embeddings locales son viables.
+We need to recall past decisions. Local embeddings are viable.
 
 ## Decision
 
-Adoptar QMD (BM25 + vectorial + rerank) como motor de lectura.
+Adopt QMD (BM25 + vector + rerank) as the read engine.
 
 ## Consequences
 
-Mayor acoplamiento a node-llama-cpp, pero evita re-implementar búsqueda híbrida.
+Tighter coupling to node-llama-cpp, but avoids reimplementing hybrid search.
 `;
 
 function buildSampleNote(): DecisionNote {
@@ -105,10 +105,9 @@ function buildSampleNote(): DecisionNote {
     status: "accepted",
     topic_key: "architecture/retrieval",
     tags: ["retrieval", "qmd"],
-    context: "Necesitamos recuperar decisiones pasadas. Los embeddings locales son viables.",
-    decision: "Adoptar QMD (BM25 + vectorial + rerank) como motor de lectura.",
-    consequences:
-      "Mayor acoplamiento a node-llama-cpp, pero evita re-implementar búsqueda híbrida.",
+    context: "We need to recall past decisions. Local embeddings are viable.",
+    decision: "Adopt QMD (BM25 + vector + rerank) as the read engine.",
+    consequences: "Tighter coupling to node-llama-cpp, but avoids reimplementing hybrid search.",
   });
 }
 
@@ -247,12 +246,12 @@ c
 
 ## Alternatives
 
-Consideramos X y Y.
+We considered X and Y.
 `;
     const note = parseNote(withExtra);
     expect(note.extraSections).toHaveLength(1);
     expect(note.extraSections[0]?.heading).toBe("Alternatives");
-    expect(note.extraSections[0]?.body).toContain("Consideramos X y Y");
+    expect(note.extraSections[0]?.body).toContain("We considered X and Y");
   });
 
   it("preserves preface content before the first H2", () => {
@@ -295,7 +294,7 @@ describe("serializeNote round-trip", () => {
   });
 
   it("round-trips a canonical input without loss", () => {
-    // CANONICAL ya está en forma canónica: parse+serialize === CANONICAL.
+    // CANONICAL is already in canonical form: parse + serialize === CANONICAL.
     expect(serializeNote(parseNote(CANONICAL))).toBe(CANONICAL);
   });
 
@@ -306,7 +305,7 @@ describe("serializeNote round-trip", () => {
   });
 
   it("normalizes non-canonical input to canonical form", () => {
-    // Extra whitespace entre secciones y trailing spaces.
+    // Extra whitespace between sections and trailing spaces.
     const sloppy = `---
 id: 2026-07-01-x
 title: X
@@ -333,7 +332,7 @@ c
 });
 
 // ---------------------------------------------------------------------------
-// Wikilinks — política: extraer, nunca materializar
+// Wikilinks — policy: extract, never materialize
 // ---------------------------------------------------------------------------
 
 describe("wikilinks", () => {
@@ -357,11 +356,11 @@ describe("wikilinks", () => {
   });
 
   it("does NOT materialize files for broken links (policy)", () => {
-    // El contrato: parseNote solo DEVUELVE la lista de targets. La creación
-    // de archivos es responsabilidad de la capa superior, y la política de
-    // AMS prohíbe crear stubs para links rotos. Verificamos que parseNote
-    // no ofrece API para crear archivos y que un link roto queda sólo en
-    // la lista de validación, sin efecto colateral.
+    // Contract: parseNote only RETURNS the list of targets. Creating files
+    // is the upper layer's responsibility, and the AMS policy forbids
+    // creating stubs for broken links. We verify that parseNote offers no
+    // API to create files and that a broken link only ends up in the
+    // validation list, with no side effect.
     const note = parseNote(`---
 id: 2026-07-01-x
 title: X
@@ -381,13 +380,13 @@ x
 y
 `);
     expect(note.wikilinks).toContain("totally-broken-link");
-    // El resultado de parse es un objeto puro; no hay rastro de creación.
+    // The parse result is a pure object; no creation side effect.
     expect(note.frontmatter.id).toBe("2026-07-01-x");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Coherencia / upsert key
+// Coherence / upsert key
 // ---------------------------------------------------------------------------
 
 describe("isCoherent (upsert key contract)", () => {
