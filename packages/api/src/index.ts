@@ -16,4 +16,18 @@ export {
 export { type DirtyEntry, type DirtyMap, DirtyStore } from "./dirty.js";
 export { type ReleaseFunction, WriteLock } from "./lock.js";
 export { createLogger, type LogEntry, type Logger, type LogLevel } from "./logger.js";
+export {
+  type GetMemoryInput,
+  loadQmdConfig,
+  type MemoryDoc,
+  type MemoryHit,
+  QmdClient,
+  type QmdClientOptions,
+  type QmdConfig,
+  QmdError,
+  QmdProtocolError,
+  QmdToolError,
+  QmdUnavailableError,
+  type SearchMemoryInput,
+} from "./qmd/index.js";
 export { type UpsertResult, Vault } from "./vault.js";
