@@ -40,6 +40,13 @@ Markdown Vault (source of truth)
 - **Obsidian-compatible linking**: preserve meaningful `[[wikilinks]]` and navigability.
 - **Conflict safety**: prefer append-only operations; use structured upserts for canonical notes.
 
+## Retrieval
+
+The read path integrates [QMD](https://github.com/tobi/qmd), a local hybrid
+search engine running as an independent HTTP daemon. AMS never builds its own
+retrieval index. See the [Retrieval Runbook](./docs/retrieval-runbook.md) for
+how to index the vault and run the daemon the `@ams/api` adapter connects to.
+
 ## Scope
 
 This repository contains planning and implementation for two packages:
