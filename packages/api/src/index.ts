@@ -1,10 +1,19 @@
 /**
  * AMS Write API package — controlled persistence service.
  *
- * Placeholder until Spec 3 (record_decision endpoint, write lock TTL + dirty
- * flag) implements the real HTTP surface. Proves the workspace wiring to
- * @ams/shared so project references are validated end-to-end.
+ * Exposes the testable surface (app factory, collaborators and types) so the
+ * MCP layer and integration tests can compose them without starting a real
+ * HTTP server. The runnable entry lives in `./server.ts`.
  */
-import { isNonEmpty } from "@ams/shared";
-
-export { isNonEmpty };
+export { type AppDeps, createApp, type NoteInput } from "./app.js";
+export {
+  type ApiConfig,
+  ConfigError,
+  DEFAULT_LOCK_TTL_MS,
+  DEFAULT_PORT,
+  loadConfig,
+} from "./config.js";
+export { type DirtyEntry, type DirtyMap, DirtyStore } from "./dirty.js";
+export { type ReleaseFunction, WriteLock } from "./lock.js";
+export { createLogger, type LogEntry, type Logger, type LogLevel } from "./logger.js";
+export { type UpsertResult, Vault } from "./vault.js";
