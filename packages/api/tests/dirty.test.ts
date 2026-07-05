@@ -49,4 +49,56 @@ describe("DirtyStore", () => {
     expect(entry.path).toBe("patterns/singleton.md");
     expect(entry.markedAt).toBeLessThanOrEqual(Date.now());
   });
+
+  it("clears specific paths and persists the change", async () => {
+    const file = join(dir, ".ams", "dirty.json");
+    const store = new DirtyStore(file);
+    await store.mark("notes/a.md");
+    await store.mark("notes/b.md");
+    await store.mark("notes/c.md");
+
+    await store.clear(["notes/a.md", "notes/c.md"]);
+
+    expect(store.has("notes/a.md")).toBe(false);
+    expect(store.has("notes/c.md")).toBe(false);
+    expect(store.has("notes/b.md")).toBe(true);
+
+    const persisted = JSON.parse(await readFile(file, "utf8"));
+    expect(persisted).not.toHaveProperty("notes/a.md");
+    expect(persisted).toHaveProperty("notes/b.md");
+  });
+
+  it("clears every flag when no paths are given", async () => {
+    const file = join(dir, ".ams", "dirty.json");
+    const store = new DirtyStore(file);
+    await Promise.all([store.mark("a.md"), store.mark("b.md")]);
+
+    await store.clear();
+
+    expect(store.snapshot()).toEqual([]);
+    const persisted = JSON.parse(await readFile(file, "utf8"));
+    expect(persisted).toEqual({});
+  });
+
+  it("is a no-op when clearing an empty store", async () => {
+    const store = new DirtyStore(join(dir, ".ams", "dirty.json"));
+    await expect(store.clear()).resolves.toBeUndefined();
+    await expect(store.clear(["nothing.md"])).resolves.toBeUndefined();
+  });
+
+  it("serializes concurrent marks and clears without losing updates", async () => {
+    const store = new DirtyStore(join(dir, ".ams", "dirty.json"));
+    await Promise.all([
+      store.mark("a.md"),
+      store.mark("b.md"),
+      store.clear(["a.md"]),
+      store.mark("c.md"),
+    ]);
+
+    const paths = store
+      .snapshot()
+      .map((e) => e.path)
+      .sort();
+    expect(paths).toEqual(["b.md", "c.md"]);
+  });
 });

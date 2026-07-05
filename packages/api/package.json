@@ -23,6 +23,7 @@
     "@ams/shared": "workspace:*",
     "@hono/node-server": "^2.0.6",
     "hono": "^4.12.27",
+    "node-cron": "^4.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

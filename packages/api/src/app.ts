@@ -20,6 +20,7 @@ import {
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import type { DirtyStore } from "./dirty.js";
+import type { IndexScheduler } from "./indexing/scheduler.js";
 import type { WriteLock } from "./lock.js";
 import type { Logger } from "./logger.js";
 import type { Vault } from "./vault.js";
@@ -30,6 +31,12 @@ export interface AppDeps {
   lock: WriteLock;
   dirty: DirtyStore;
   logger: Logger;
+  /**
+   * Optional so the tracer-bullet app can run without the scheduler wired
+   * (e.g. the existing note-writing tests). When present it powers
+   * `POST /admin/reindex`.
+   */
+  scheduler?: IndexScheduler;
 }
 
 /** Request payload accepted by POST /notes. */
@@ -51,6 +58,22 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   app.post("/notes", async (c) => recordNote(c, deps));
+
+  app.post("/admin/reindex", async (c) => {
+    // Forces one indexing cycle now, regardless of the cron schedule. Used for
+    // debugging and for tests that need retrieval to reflect a write without
+    // waiting on real time. Returns 503 when the scheduler is unwired or the
+    // reindex fails, so callers can tell a missing-config answer from an ok.
+    if (!deps.scheduler) {
+      return c.json(
+        { error: "scheduler_unavailable", message: "Index scheduler is not wired" },
+        503,
+      );
+    }
+    const result = await deps.scheduler.tick();
+    const code = result.status === "failed" ? 503 : 200;
+    return c.json(result, code);
+  });
 
   return app;
 }
