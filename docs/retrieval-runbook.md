@@ -42,9 +42,9 @@ qmd update      # scan files into the FTS5 index
 qmd embed       # generate vector embeddings (~300 MB model, first run)
 ```
 
-Re-run `qmd update && qmd embed` whenever notes change (the Spec 5 indexer
-will automate this from the dirty-flag store; for the tracer bullet run it by
-hand).
+Re-run `qmd update && qmd embed` whenever notes change. The Write API ships an
+**automatic indexer** (Spec 5) that does this on a schedule — see
+[Automatic reindexing](#5b-automatic-reindexing-spec-5) below.
 
 ## 3. Rerank policy
 
@@ -90,6 +90,37 @@ The adapter reads its target from a single environment variable:
 
 ```sh
 export AMS_QMD_URL=http://localhost:8181
+```
+
+## 5b. Automatic reindexing (Spec 5)
+
+Writes land in the vault instantly but only become searchable once QMD's index
+is rebuilt. Doing that inline on every write is too expensive (model-bound), so
+the Write API runs an embedded scheduler that periodically drains the
+dirty-flag store and shells out to `qmd update` + `qmd embed`. The QMD daemon
+serves the refreshed index with no restart.
+
+| Variable             | Default          | Description                                                                 |
+| -------------------- | ---------------- | --------------------------------------------------------------------------- |
+| `AMS_INDEX_CRON`     | `*/2 * * * *`    | node-cron expression for the reindex tick. Validated at boot.               |
+| `AMS_INDEX_ENABLED`  | `true`           | Master kill-switch for the periodic task (`false`/`0`/`off`/`no`).          |
+| `AMS_QMD_COLLECTION` | _(unset: all)_   | Scope `qmd embed -c <name>` to one collection. `qmd update` is unaffected.  |
+| `AMS_QMD_BIN`        | `qmd`            | Path to the QMD CLI binary invoked by the reindexer.                        |
+
+> Scope note: the `qmd` CLI accepts `-c <collection>` only on `embed`, not on
+> `update` (verified against qmd 2.5). On a single-collection AMS vault the
+> difference is moot; `update` always re-scans every registered collection.
+
+Failure semantics: a tick that fails (CLI non-zero exit, ENOENT, timeout)
+leaves every dirty flag in place and retries on the next tick. Flags are
+cleared only after a successful reindex.
+
+Manual / debug trigger — forces one indexing cycle now, regardless of the
+schedule, and returns the result as JSON:
+
+```sh
+curl -X POST http://localhost:3000/admin/reindex
+# {"status":"ok","indexed":3,"pending":0}
 ```
 
 ## 6. Graceful degradation

@@ -53,6 +53,22 @@ export class DirtyStore {
     return this.entries.has(relPath);
   }
 
+  /**
+   * Clears the supplied paths (or every path when omitted), persisting
+   * atomically. The Spec 5 indexer calls this with the batch it just
+   * re-indexed successfully — flags survive every failed tick because they
+   * are removed only here, never on the error path.
+   */
+  clear(paths?: string[]): Promise<void> {
+    const toClear = paths ?? [...this.entries.keys()];
+    if (toClear.length === 0) return Promise.resolve();
+    this.chain = this.chain.then(async () => {
+      for (const p of toClear) this.entries.delete(p);
+      await this.persist();
+    });
+    return this.chain as Promise<void>;
+  }
+
   private async persist(): Promise<void> {
     const map: DirtyMap = {};
     for (const [path, markedAt] of this.entries) {

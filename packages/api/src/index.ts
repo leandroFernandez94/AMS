@@ -14,6 +14,27 @@ export {
   loadConfig,
 } from "./config.js";
 export { type DirtyEntry, type DirtyMap, DirtyStore } from "./dirty.js";
+export {
+  CliReindexer,
+  type CliReindexerOptions,
+  type CommandResult,
+  type CommandRunner,
+  createExecRunner,
+  DEFAULT_INDEX_CRON,
+  INDEX_CRON_ENV,
+  INDEX_ENABLED_ENV,
+  type IndexConfig,
+  IndexConfigError,
+  IndexScheduler,
+  type IndexSchedulerOptions,
+  loadIndexConfig,
+  QMD_BIN_ENV,
+  QMD_COLLECTION_ENV,
+  type Reindexer,
+  type ReindexResult,
+  type SchedulerDeps,
+  type TickResult,
+} from "./indexing/index.js";
 export { type ReleaseFunction, WriteLock } from "./lock.js";
 export { createLogger, type LogEntry, type Logger, type LogLevel } from "./logger.js";
 export {
