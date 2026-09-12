@@ -56,12 +56,14 @@ qmd init
 qmd collection add "$V/vault" --name ams
 ```
 
-Build and start the Write API:
+Build and start the Write API from the temp project so `qmd update` resolves
+the local `.qmd` registry instead of falling back to the global one:
 
 ```bash
 cd /path/to/ams
 pnpm build
-AMS_VAULT_PATH="$V/vault" AMS_API_PORT=3000 node packages/api/dist/server.js
+cd "$V"
+AMS_VAULT_PATH="$V/vault" AMS_API_PORT=3000 node /path/to/ams/packages/api/dist/server.js
 ```
 
 In another terminal, from the vault directory, start the QMD daemon:
@@ -85,12 +87,20 @@ Reindex so the note becomes searchable:
 curl -s -X POST http://localhost:3000/admin/reindex
 ```
 
-Search via the QMD MCP HTTP endpoint. See `docs/retrieval-runbook.md` for the
-full JSON-RPC `tools/call query` recipe; the summary is:
+Search via the QMD MCP HTTP endpoint. The daemon requires an MCP `initialize`
+handshake first; capture the `mcp-session-id` response header and echo it on
+the query:
 
 ```bash
+SESSION=$(curl -s -D - -X POST http://localhost:8184/mcp \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ams-runbook","version":"0.0.0"}}}' \
+  | awk '/mcp-session-id/ {print $2}' | tr -d '\r')
 curl -s -X POST http://localhost:8184/mcp \
   -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION" \
   -d '{
     "jsonrpc":"2.0","id":1,"method":"tools/call",
     "params":{"name":"query","arguments":{"searches":[{"type":"lex","query":"manual tracer"},{"type":"vec","query":"manual tracer"}],"rerank":false}}
@@ -127,3 +137,7 @@ Then connect any MCP client (e.g., the MCP inspector) and call:
 | First run is very slow | Model download | Wait; subsequent runs reuse `~/.cache/qmd/models/` |
 
 To see daemon logs, run `qmd mcp --http --port <port>` in the foreground and watch stderr.
+
+To clean up leaked qmd daemons, run `pgrep -af "qmd mcp"` to list them and
+`kill <pid>` to stop one. If a dev run polluted the global registry, remove
+the stale collection with `qmd collection remove <name>` and then `qmd update`.

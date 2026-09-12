@@ -61,3 +61,11 @@ Chain strategy: size-exception
 
 - [x] 6.1 Run `pnpm check && pnpm tracer` — confirm biome passes on all files (including `e2e/`) and the full E2E suite (tracer.test.ts + failure-modes.test.ts) passes with qmd on PATH. Note: `pnpm typecheck` does NOT cover `e2e/` (root tsconfig references only `packages/*`); the vitest config resolves workspace aliases to source, so type errors surface at test runtime.
 - [x] 6.2 Confirm `pnpm test` is unchanged — the default suite does not collect any `e2e/` files (root vitest.config.ts `include: ["packages/**/*.{test,spec}.ts"]`). Covers Scenario: Default suite untouched.
+
+## Remediation
+
+- [x] C-1(a): Fix runbook manual recipe to start the API with cwd inside `$V` so `qmd update` resolves the project-local `.qmd` registry.
+- [x] C-1(b): Replace the one-shot query curl with the MCP initialize → `mcp-session-id` → `tools/call` handshake.
+- [x] W-1: Close the isolation canary blind spot by asserting the global index stays absent when it was absent at snapshot.
+- [x] S-1: Record that `@modelcontextprotocol/sdk@1.29.0` was added as a second root devDep (tracer config resolves @ams/mcp source directly; SDK not hoisted).
+- [x] S-2: Add runbook troubleshooting hints for leaked qmd daemons and stale global collections.
