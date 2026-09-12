@@ -36,13 +36,13 @@ Chain strategy: size-exception
 
 ## Phase 3: Happy-Path Test (loop proof + lifecycle + isolation)
 
-- [ ] 3.1 Create `e2e/tracer.test.ts` — `describe("happy-path loop")`: `beforeAll` calls `createTracerFixture()`, `afterAll` calls `fx.teardown()`. Test: `record_note` via `fx.mcp` with `{ title, type: "note", body }` → assert response text matches `/Note recorded: .+ at .+/` and `isError` is false. Covers Scenario: Happy-path loop (write path).
-- [ ] 3.2 `describe("happy-path loop")` continued: assert the returned path exists on disk (`fs.existsSync`), read the file, use `parseNote` to verify title and body round-trip the recorded input. Covers Scenario: Note content and path on disk.
-- [ ] 3.3 `describe("happy-path loop")` continued: call `fx.reindex()` → assert `status === "ok"` and `indexed >= 1`. Then `search_memory` with a query matching the note body → assert response text contains the vault-relative path and a `[#docid]` marker. Covers Scenario: Happy-path loop (reindex + retrieval).
-- [ ] 3.4 `describe("lifecycle and readiness")`: the fixture boot itself proves Scenario: Successful boot (both ports known, readiness polling succeeded within timeout). Add a test that asserts `fx.apiUrl` and `fx.qmdUrl` are non-empty strings and the MCP client is connected.
-- [ ] 3.5 `describe("lifecycle and readiness")` — port-taken scenario: bind a `net.createServer().listen(P)`, call `startQmdDaemon(root, async () => occupiedPort)` where `occupiedPort` is P, assert the returned `port !== P` and `QmdClient#isReachable()` succeeds on the returned URL. Tear down the occupying server and the daemon. Covers Scenario: Chosen daemon port is taken.
-- [ ] 3.6 `describe("isolation")`: `createIsolationCanary()` before fixture, run the full loop, call `canary.assertUnchanged()` → no `.qmd` artifacts outside the fixture. Positive control: `fs.existsSync(path.join(fx.root, ".qmd", "index.sqlite"))` is true. Covers Scenario: Isolation canary.
-- [ ] 3.7 Verify: `pnpm tracer` runs and all tests in `e2e/tracer.test.ts` pass (requires qmd on PATH).
+- [x] 3.1 Create `e2e/tracer.test.ts` — `describe("happy-path loop")`: `beforeAll` calls `createTracerFixture()`, `afterAll` calls `fx.teardown()`. Test: `record_note` via `fx.mcp` with `{ title, type: "note", body }` → assert response text matches `/Note recorded: .+ at .+/` and `isError` is false. Covers Scenario: Happy-path loop (write path).
+- [x] 3.2 `describe("happy-path loop")` continued: assert the returned path exists on disk (`fs.existsSync`), read the file, use `parseNote` to verify title and body round-trip the recorded input. Covers Scenario: Note content and path on disk.
+- [x] 3.3 `describe("happy-path loop")` continued: call `fx.reindex()` → assert `status === "ok"` and `indexed >= 1`. Then `search_memory` with a query matching the note body → assert response text contains the vault-relative path and a `[#docid]` marker. Covers Scenario: Happy-path loop (reindex + retrieval).
+- [x] 3.4 `describe("lifecycle and readiness")`: the fixture boot itself proves Scenario: Successful boot (both ports known, readiness polling succeeded within timeout). Add a test that asserts `fx.apiUrl` and `fx.qmdUrl` are non-empty strings and the MCP client is connected.
+- [x] 3.5 `describe("lifecycle and readiness")` — port-taken scenario: bind a `net.createServer().listen(P)`, call `startQmdDaemon(root, async () => occupiedPort)` where `occupiedPort` is P, assert the returned `port !== P` and `QmdClient#isReachable()` succeeds on the returned URL. Tear down the occupying server and the daemon. Covers Scenario: Chosen daemon port is taken.
+- [x] 3.6 `describe("isolation")`: `createIsolationCanary()` before fixture, run the full loop, call `canary.assertUnchanged()` → no `.qmd` artifacts outside the fixture. Positive control: `fs.existsSync(path.join(fx.root, ".qmd", "index.sqlite"))` is true. Covers Scenario: Isolation canary.
+- [x] 3.7 Verify: `pnpm tracer` runs and all tests in `e2e/tracer.test.ts` pass (requires qmd on PATH).
 
 ## Phase 4: Failure Modes (adversarial assertions)
 
