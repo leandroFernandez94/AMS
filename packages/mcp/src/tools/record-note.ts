@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { mapUnknownError, mapWriteApiError, toMcpText } from "../errors.js";
+import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../errors.js";
 
 /** Collaborators needed by the `record_note` tool. */
 export interface RecordNoteDeps {
@@ -41,13 +41,18 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
         };
       }
 
+      let response: Response;
       try {
-        const response = await deps.fetch(`${apiUrl}/notes`, {
+        response = await deps.fetch(`${apiUrl}/notes`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(args),
         });
+      } catch {
+        return toMcpError("Write API unavailable");
+      }
 
+      try {
         if (!response.ok) {
           const body = await parseJson(response);
           return mapWriteApiError(response.status, body);
