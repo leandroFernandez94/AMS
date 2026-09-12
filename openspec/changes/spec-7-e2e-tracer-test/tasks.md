@@ -52,10 +52,10 @@ Chain strategy: size-exception
 
 ## Phase 5: Runbook (documentation)
 
-- [ ] 5.1 Create `docs/tracer-runbook.md`: section 1 — Prerequisites (Node ≥ 22, `npm i -g @tobilu/qmd`, `qmd --version` ≥ 2.5.3). Section 2 — First-run cost (embedding model ~300 MB download, ~2 GB with reranker, cached in `~/.cache/qmd/models/`, `pnpm tracer` may take minutes first time). Covers Scenario: First-run model download is documented.
-- [ ] 5.2 `docs/tracer-runbook.md` continued: section 3 — Automated suite (`pnpm tracer`, what it proves, temp vault location). Section 4 — Manual loop reproduction with curl: `V=$(mktemp -d)` → `mkdir $V/vault` → `cd $V && qmd init && qmd collection add $V/vault --name ams` → `pnpm build` → `AMS_VAULT_PATH=$V/vault node packages/api/dist/server.js` → `qmd mcp --http --port 8184` from `$V` → `curl POST :3000/notes` → `curl POST :3000/admin/reindex` → verify search via JSON-RPC on `:8184/mcp`. Covers Scenario: Manual reproduction.
-- [ ] 5.3 `docs/tracer-runbook.md` continued: section 5 — MCP client reproduction (`packages/mcp/dist/bin.js` with env vars, drive with any MCP client). Section 6 — Troubleshooting (port-taken behavior, precheck failure text, daemon logs, port conflicts).
-- [ ] 5.4 Verify: `pnpm check` passes (biome lint on the runbook); read through the runbook and confirm all steps are complete and ordered.
+- [x] 5.1 Create `docs/tracer-runbook.md`: section 1 — Prerequisites (Node ≥ 22, `npm i -g @tobilu/qmd`, `qmd --version` ≥ 2.5.3). Section 2 — First-run cost (embedding model ~300 MB download, ~2 GB with reranker, cached in `~/.cache/qmd/models/`, `pnpm tracer` may take minutes first time). Covers Scenario: First-run model download is documented.
+- [x] 5.2 `docs/tracer-runbook.md` continued: section 3 — Automated suite (`pnpm tracer`, what it proves, temp vault location). Section 4 — Manual loop reproduction with curl: `V=$(mktemp -d)` → `mkdir $V/vault` → `cd $V && qmd init && qmd collection add $V/vault --name ams` → `pnpm build` → `AMS_VAULT_PATH=$V/vault node packages/api/dist/server.js` → `qmd mcp --http --port 8184` from `$V` → `curl POST :3000/notes` → `curl POST :3000/admin/reindex` → verify search via JSON-RPC on `:8184/mcp`. Covers Scenario: Manual reproduction.
+- [x] 5.3 `docs/tracer-runbook.md` continued: section 5 — MCP client reproduction (`packages/mcp/dist/bin.js` with env vars, drive with any MCP client). Section 6 — Troubleshooting (port-taken behavior, precheck failure text, daemon logs, port conflicts).
+- [x] 5.4 Verify: `pnpm check` passes (biome lint on the runbook); read through the runbook and confirm all steps are complete and ordered.
 
 ## Phase 6: Final Gate
 
