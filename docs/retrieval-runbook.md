@@ -62,17 +62,27 @@ Start QMD's MCP-over-HTTP server. AMS connects to it over a stateless
 `POST /mcp` JSON-RPC endpoint.
 
 ```sh
-# Foreground (Ctrl-C to stop) — binds localhost:8181 by default
+# Foreground (Ctrl-C to stop) — binds the IPv6 loopback (::1) on port 8181
 qmd mcp --http
 
-# Custom port / bind all interfaces (e.g. inside a container)
-qmd mcp --http --host 0.0.0.0 --port 8181
+# Custom port
+qmd mcp --http --port 8184
 
 # Background daemon (writes a PID file to ~/.cache/qmd/mcp.pid)
 qmd mcp --http --daemon
 qmd mcp stop     # stop via PID file
 qmd status       # shows "MCP: running (PID ...)" when active
 ```
+
+> **IPv4 binding caveat (verified on qmd 2.5.3):** `--host` is accepted but
+> silently ignored — the daemon always binds `::1` (IPv6 loopback) only, so it
+> is unreachable over IPv4, including docker port publishing and `127.0.0.1`
+> probes. To expose it over IPv4 (e.g. inside a container), bridge the port
+> with socat — this is what the repo `Dockerfile` does:
+>
+> ```sh
+> socat TCP4-LISTEN:8181,bind=0.0.0.0,fork,reuseaddr TCP6:[::1]:8181
+> ```
 
 Verify liveness:
 
