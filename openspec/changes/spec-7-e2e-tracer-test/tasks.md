@@ -59,5 +59,5 @@ Chain strategy: size-exception
 
 ## Phase 6: Final Gate
 
-- [ ] 6.1 Run `pnpm check && pnpm tracer` — confirm biome passes on all files (including `e2e/`) and the full E2E suite (tracer.test.ts + failure-modes.test.ts) passes with qmd on PATH. Note: `pnpm typecheck` does NOT cover `e2e/` (root tsconfig references only `packages/*`); the vitest config resolves workspace aliases to source, so type errors surface at test runtime.
-- [ ] 6.2 Confirm `pnpm test` is unchanged — the default suite does not collect any `e2e/` files (root vitest.config.ts `include: ["packages/**/*.{test,spec}.ts"]`). Covers Scenario: Default suite untouched.
+- [x] 6.1 Run `pnpm check && pnpm tracer` — confirm biome passes on all files (including `e2e/`) and the full E2E suite (tracer.test.ts + failure-modes.test.ts) passes with qmd on PATH. Note: `pnpm typecheck` does NOT cover `e2e/` (root tsconfig references only `packages/*`); the vitest config resolves workspace aliases to source, so type errors surface at test runtime.
+- [x] 6.2 Confirm `pnpm test` is unchanged — the default suite does not collect any `e2e/` files (root vitest.config.ts `include: ["packages/**/*.{test,spec}.ts"]`). Covers Scenario: Default suite untouched.
