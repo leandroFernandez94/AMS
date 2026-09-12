@@ -23,6 +23,9 @@ coverage/
 # Local verification vaults
 test-vault/
 
+# Stray qmd project state (never part of the repo)
+.qmd/
+
 # OS / Editor
 .DS_Store
 Thumbs.db
