@@ -1,138 +1,146 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:9adf65daf2906d2d7189da2f208c82c42903b84726f895e68633cfc17c24814e
-verdict: fail
+evidence_revision: sha256:928b9b35eac8a137d8ecb73bb0301618a4a3cd5dd5a268f0c9ab2a5b106e2150
+verdict: pass
 blockers: 0
-critical_findings: 1
-requirements: 5/6
-scenarios: 12/13
+critical_findings: 0
+requirements: 6/6
+scenarios: 13/13
 test_command: pnpm test
 test_exit_code: 0
-test_output_hash: sha256:aea844e1149700f990b31ddd0475d0226f577d3af271ae5b5a627e9cd4ed5685
+test_output_hash: sha256:1196a37509dd69b4821ff7847ca6116ba33ba7a6c3f3ff50555f5ff904de864e
 build_command: pnpm typecheck
 build_exit_code: 0
 build_output_hash: sha256:1a9d0ae645dd7a140cca346d6aff986ea7da3ce5c5da91377facf5cc18c34127
 ```
 
-# Verify Report: spec-7-e2e-tracer-test (re-verification)
+# Verify Report: spec-7-e2e-tracer-test (FINAL — round 3)
 
 **Change**: spec-7-e2e-tracer-test
 **Mode**: Standard (Strict TDD off — `openspec/config.yaml` `tdd: false`)
-**Implementation**: branch `feat/spec-7-e2e-tracer-test`, HEAD `86997e2` (remediation commits `f0ed83a`, `86997e2` on top of the originally verified `f66c859`), clean working tree (this report previously untracked; committed by this verification)
-**Evidence revision**: 2 — `evidence_revision` is the sha256 of the concatenated raw logs of `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm tracer` captured during this re-verification
+**Implementation**: branch `feat/spec-7-e2e-tracer-test`, HEAD `989c407` (round-2 remediation commits `0beca07` N-1, `3f666a0` N-2, `989c407` stray-`.qmd` gitignore, on top of round-1 remediation `f0ed83a`/`86997e2`), clean working tree (this report is the only change, committed by this verification)
+**Evidence revision**: 3 — `evidence_revision` is the sha256 of the concatenated raw logs of `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm tracer` captured during this final verification
 
 ## Summary
 
-**FAIL (one NEW CRITICAL finding).** The remediation itself is good — all four prior
-findings are resolved, and this verification independently re-proved C-1 by executing the
-current runbook recipe end-to-end with the repo's own `dist` (record → disk → cwd-scoped
-reindex → initialize handshake → query → note found, with the global
-`~/.cache/qmd/index.sqlite` byte-identical from baseline to post-cleanup). However, the
-regression sweep surfaced a defect the previous verification missed: **fixture teardown
-kills only the spawned `qmd` supervisor, not the socket-holding worker process qmd forks
-internally** — every *clean* `pnpm tracer` run leaves ~6 orphaned live daemons listening
-on ports with deleted fixture cwds (pids 1934454/1934467/1934597/1934769/1934805/1934900
-from this verification's own 14:07:45 run, still alive 8+ minutes later; identical cohorts
-from the 13:37, 14:02 and 14:04 clean runs). The "Teardown" scenario ("every spawned qmd
-process is killed") is empirically false; the prior report's "zero qmd processes left by
-the run" observation was a faulty sweep (it did not match worker cmdlines). A second, minor
-defect: the newly added S-2 troubleshooting command `pgrep -af "qmd mcp"` matches zero
-daemons on qmd 2.5.3 (actual cmdline is `…/qmd.js mcp …`).
+**PASS — 13/13 scenarios compliant, 6/6 requirements.** Both round-2 findings are resolved
+and were re-proven independently by this verification, not trusted from receipts. N-1: from
+a verified zero-daemon baseline, a clean `pnpm tracer` run (9/9 tests, exit 0) left **zero
+qmd processes** (0 before → 0 after), **zero** `/tmp/ams-tracer-*` directories, and **zero**
+processes with a cwd inside leftover or deleted fixture dirs — checked with three independent
+methods (bracket-pattern `pgrep -af "qmd[.]js mcp"`, a broadest-net `ps -eo args` scan for
+any `qmd` text, and a `/proc/*/cwd` walk). This is the exact sweep that round 2 failed (it
+found 6 live leaked workers after a clean run). The teardown mechanism was additionally
+proven live: a manually spawned daemon pair (supervisor + forked socket-holding worker) died
+completely under a single group SIGTERM, with the port released. N-2: the runbook hint
+patterns were verified against real daemon cmdlines on qmd 2.5.3 — supervisor
+`node …/bin/qmd mcp --http --port P`, worker `node …/@tobilu/qmd/dist/cli/qmd.js mcp …` —
+`pgrep -af qmd` lists both, `qmd.js mcp` matches the leak-critical worker (the old
+`qmd mcp` pattern never matched leaked workers, confirming round 2's diagnosis), and the
+self-match caution is present and was live-demonstrated during this verification's own
+probing. All gates pass. The change is archive-ready.
 
 ## Completeness
 
 | Metric | Value |
 |--------|-------|
-| Tasks total | 31 (26 original + 5 remediation) |
-| Tasks complete | 31 |
+| Tasks total | 34 (26 original + 5 remediation round 1 + 3 remediation round 2) |
+| Tasks complete | 34 |
 | Tasks incomplete | 0 |
 
 ## Runtime Verification — Commands & Results
 
 | Command | Observed result |
 |---|---|
-| `pnpm check` | ✅ exit 0 — `biome check .` — "Checked 64 files in 30ms. No fixes applied." (includes `e2e/`) |
-| `pnpm typecheck` | ✅ exit 0 — `tsc --build`, silent (`e2e/` outside the tsc graph by design, documented in tasks.md and design.md Non-Goals) |
-| `pnpm test` | ✅ exit 0 — 149 passed / 0 failed / 4 skipped; cross-check `vitest list` → **0** files under `e2e/` collected |
-| `pnpm tracer` | ✅ exit 0 — precheck + `vitest run --config vitest.tracer.config.ts` — 2 test files, **9/9 tests passed**, 9.41 s |
-| `env PATH=/usr/bin:/bin <node> e2e/precheck.mjs` (missing-qmd simulation) | ✅ exact message `Missing prerequisite: 'qmd' is not on PATH — install with npm i -g @tobilu/qmd, see docs/tracer-runbook.md`, exit 1, before any vitest startup |
+| `pnpm check` | ✅ exit 0 — `biome check .` — "Checked 64 files in 26ms. No fixes applied." (includes `e2e/`) |
+| `pnpm typecheck` | ✅ exit 0 — `tsc --build`, silent (`e2e/` outside the tsc graph by design, documented in tasks.md; output hash byte-identical to round 2 — silent as expected) |
+| `pnpm test` | ✅ exit 0 — 149 passed / 0 failed / 4 skipped; `vitest list` under the default config collects **0** files under `e2e/` |
+| `pnpm tracer` | ✅ exit 0 — precheck + `vitest run --config vitest.tracer.config.ts` — 2 test files, **9/9 tests passed**, 14.98 s |
+| `env PATH=/usr/bin:/bin node e2e/precheck.mjs` | ✅ exact message `Missing prerequisite: 'qmd' is not on PATH — install with npm i -g @tobilu/qmd, see docs/tracer-runbook.md`, exit 1, before any vitest startup |
 | `git diff main..HEAD -- vitest.config.ts` | ✅ empty (0 lines) — default config untouched |
-| `git diff main..HEAD -- package.json` | scripts: only `+ "tracer": …`; devDeps: `+ @hono/node-server ^2.0.6`, `+ @modelcontextprotocol/sdk 1.29.0` (S-1 record matches) |
-| Manual runbook recipe (see C-1 re-proof) | ✅ full loop observed: 201 + file on disk + `{"status":"ok","indexed":1}` + note found via handshake query; global index stat identical throughout |
-| Post-run process sweep | ❌ 6 live qmd daemons leaked by this verification's own clean `pnpm tracer` run (N-1) |
+| `git diff main..HEAD -- package.json` | ✅ scripts: only `+ "tracer": …`; devDeps: `+ @hono/node-server ^2.0.6`, `+ @modelcontextprotocol/sdk 1.29.0` (S-1 record matches) |
+| Repo stray state | ✅ no `.qmd/` in repo root; `.gitignore` carries `.qmd/` (989c407) |
 
 Build/typecheck: ✅ Passed. Tests: ✅ 149 default + 9 E2E passed. Coverage: ➖ Not available
 (no coverage command configured; threshold 0 per `rules.verify`).
 
-### C-1 independent empirical re-proof (executed by this verification, not trusted from receipts)
+### N-1 independent proof (executed by this verification)
 
-Recipe executed from `docs/tracer-runbook.md` §"Manual loop reproduction with curl" in a
-fresh `mktemp -d`, with two environmental deviations, both covered by the runbook's own
-Troubleshooting section: API port 3717 instead of 3000 (3000 is held by a foreign
-service on this machine), and the recipe's daemon port 8184 used verbatim after killing
-the leaked orphaned daemon that held it — exactly the `pgrep`/`kill` procedure the runbook
-prescribes.
+Process accounting around a clean `pnpm tracer` run, using self-match-safe enumeration
+(bracket pattern in a dedicated probe script so no wrapper cmdline could self-match):
 
-```text
-1. V=$(mktemp -d); mkdir $V/vault; cd $V && qmd init && qmd collection add $V/vault --name ams
-   → "ready to go with new local index"; collection 'ams' created; local $V/.qmd registry exists
-2. cd /path/to/ams && pnpm build → exit 0 (dist/server.js, dist/bin.js present)
-3. Baseline global index stat: ~/.cache/qmd/index.sqlite → mtime_ns 1789212374.989912103, size 3289088
-4. cd $V && AMS_VAULT_PATH=$V/vault AMS_API_PORT=3717 node /path/to/ams/packages/api/dist/server.js
-   → "ams-write-api:listening" port 3717, vault $V/vault   (cwd-scoped start per fixed runbook)
-5. cd $V && qmd mcp --http --port 8184 → daemon up
-6. curl POST /notes {"title":"Manual Tracer",...} → 201 {"id":"2026-09-12-manual-tracer",
-   "path":"notes/2026-09-12-manual-tracer.md","created":true}
-7. File on disk: frontmatter round-trips title "Manual Tracer" + body "Proving the loop by hand."
-8. Global index stat before reindex: IDENTICAL to baseline
-9. curl POST /admin/reindex → {"status":"idle","indexed":0,"pending":0}
-   (the scheduler's */2 cron tick had already drained note #1 — anticipated by the runbook's
-   troubleshooting "or wait for the cron tick"; not a defect)
-10. Second note + immediate reindex → {"status":"ok","indexed":1,"pending":0}
-    (proves the manual reindex path genuinely indexes — the exact C-1a failure mode)
-11. Global index stat after both reindexes AND after full cleanup: IDENTICAL to baseline
-    (mtime_ns 1789212374.989912103, size 3289088 — zero global mutation; local $V/.qmd
-    index.sqlite + 3.7 MB WAL grew instead)
-12. SESSION=$(curl initialize …) → mcp-session-id 446ff8c6-c4cc-41f2-b7b9-44e514444c8a
-13. curl tools/call query {"searches":[lex+vec "manual tracer"],rerank:false} with the session →
-    "Found 2 results": ams/notes/2026-09-12-manual-tracer.md (score 1, snippet shows
-    "title: Manual Tracer") + ams/notes/2026-09-12-second-manual-tracer.md (score 0.5)
-14. Cleanup: API + daemon killed (including the socket-holding worker child), ports released,
-    temp dir removed
-```
+| Check | Before run | After run |
+|---|---|---|
+| `pgrep -af "qmd[.]js mcp"` daemon count | **0** | **0** |
+| Broadest net: any `qmd` text in any cmdline (`ps -eo pid,args`) | none | none |
+| `/tmp/ams-tracer-*` directories | 0 | **0** |
+| `/proc/*/cwd` inside leftover/deleted `ams-tracer-*` dirs | 0 | **0** |
 
-**C-1a and C-1b are both empirically disproven as defects: the loop is now observable
-verbatim by a human, and the recipe never touches the global index.**
+Mechanism was additionally proven in isolation and by code reading:
+
+1. **Live group-kill experiment**: this verification spawned its own daemon via `setsid qmd
+   mcp --http --port 18331` in a scratch dir. `pgrep -af qmd` showed the two-process
+   structure — supervisor `node …/bin/qmd mcp …` and its forked socket-holding worker
+   `node …/@tobilu/qmd/dist/cli/qmd.js mcp …` (worker ppid = supervisor pid). A single
+   `kill -TERM -<pgid>` ended **both** processes; port 18331 released; cwd scan clean;
+   scratch dir removed. The round-2 leak mode (worker surviving a parent-only kill) is
+   structurally closed by group signaling.
+2. **Teardown code path is live, not dead**: `e2e/fixtures/vault.ts` spawns the daemon
+   `detached: true` (line 83) so it leads its own process group; `killProcessTree`
+   (lines 251–278) sends SIGTERM to `-pgid`, races a 5 s exit, escalates to SIGKILL, then
+   polls `/proc` until the group is empty; `assertNoSurvivors` (lines 286–313) scans
+   `/proc/*/cmdline` for `qmd.js` + `mcp` AND `/proc/*/cwd` (stripping the `(deleted)`
+   suffix) for cwds inside the fixture root, and **throws** on any survivor. It executes
+   in the fixture `teardown()` after `rm(root)` (line 404) and in the port-taken test
+   (`e2e/tracer.test.ts:140`); all four fixture-consuming describes invoke `fx.teardown()`
+   in `afterAll`. The Teardown scenario is now guarded by a runtime assertion inside the
+   suite itself — the gap round 2 flagged (no automated covering check) is closed.
+
+### N-2 verification (executed by this verification)
+
+`docs/tracer-runbook.md` (lines 141–144) now prescribes `pgrep -af qmd` to list and
+`pkill -f "qmd.js mcp"` to stop leaked daemons, plus the caution to run `pkill` directly in
+the shell rather than nested in another command string. Verified against reality:
+
+- `pgrep -af qmd` listed both live daemon processes in the experiment above. ✅
+- The `qmd.js mcp` substring matches the worker cmdline — the process that actually leaks
+  (round 2 showed leaked cohorts are always workers). The old broken pattern `qmd mcp`
+  matches only the supervisor invocation form and never the leaked-worker form, which is
+  exactly why round 2 observed zero matches against 58 live daemons. ✅
+- The self-match caution is accurate and was live-demonstrated: this verification's own
+  sweep wrappers matched themselves whenever the literal pattern text was nested inside a
+  command string, and stopped matching once the probe moved to a script file. ✅
 
 ## Spec Compliance Matrix
 
-| Requirement | Scenario | Test / Evidence | Result |
-|-------------|----------|-----------------|--------|
-| Tracer Loop Proof | Happy-path loop | `e2e/tracer.test.ts > happy-path loop > reindexes and finds the note via search_memory` (runtime: 9/9 passed this verification) | ✅ COMPLIANT |
-| Tracer Loop Proof | Note content and path on disk | `e2e/tracer.test.ts > happy-path loop > persists the note on disk and round-trips title and body` + manual recipe step 7 | ✅ COMPLIANT |
-| Fixture Isolation | Isolation canary | `e2e/tracer.test.ts > isolation > does not leak .qmd artifacts outside the fixture` + `keeps the fixture-local qmd index`; W-1-hardened canary active and passing; manual recipe independently confirmed global index byte-identical | ✅ COMPLIANT |
-| Fixture Isolation | Teardown | afterAll → `fx.teardown()` in all 4 describes + port-taken self-cleanup: temp dir removed ✅, spawned supervisor killed ✅ — **but qmd's socket-holding worker survives every clean run** (6 live leaked daemons from this verification's own run; N-1) | ❌ FAILING (N-1) |
-| Lifecycle and Readiness | Successful boot | `e2e/tracer.test.ts > lifecycle and readiness > knows both bound ports and has a connected MCP client` (fixture boot readiness within 15 s) | ✅ COMPLIANT |
-| Lifecycle and Readiness | Chosen daemon port is taken | `e2e/tracer.test.ts > lifecycle and readiness > retries daemon boot when the probed port is already taken` (first-attempt → occupied port, retry → free port; verified in source lines 111–139) | ✅ COMPLIANT |
-| Failure Mode Assertions | Concurrent same-note writes serialize | `e2e/failure-modes.test.ts > lock contention > serializes two concurrent record_note calls for the same note` (`Promise.all`, one recorded + one updated, no `isError`) | ✅ COMPLIANT |
-| Failure Mode Assertions | QMD down | `e2e/failure-modes.test.ts > qmd down > maps search_memory to a structured error and keeps the server alive` (`isError` + `QMD retrieval unavailable`, follow-up write succeeds) | ✅ COMPLIANT |
-| Tracer Entrypoint | Tracer run on a prepared machine | This verification: `pnpm tracer` → 9/9 passed, exit 0 | ✅ COMPLIANT |
-| Tracer Entrypoint | Missing qmd binary | `e2e/precheck.mjs` under PATH without qmd → exact message, exit 1, script chain prevents vitest startup | ✅ COMPLIANT |
-| Tracer Entrypoint | Default suite untouched | `git diff main..HEAD -- vitest.config.ts` empty; `vitest list` shows 0 e2e files; 149 passed | ✅ COMPLIANT |
-| Tracer Runbook | Manual reproduction | **Empirically re-proved by this verification** (recipe transcript above): write → disk → cwd-scoped reindex → initialize handshake → query → note found | ✅ COMPLIANT (C-1 resolved, f0ed83a) |
-| Tracer Runbook | First-run model download is documented | `docs/tracer-runbook.md` §First-run cost: ~300 MB model, ~2 GB full set, `~/.cache/qmd/models/`, "first run can take several minutes" | ✅ COMPLIANT |
+| # | Requirement | Scenario | Test / Evidence | Result |
+|---|-------------|----------|-----------------|--------|
+| 1 | Tracer Loop Proof | Happy-path loop | `e2e/tracer.test.ts > happy-path loop > reindexes and finds the note via search_memory` (runtime: 9/9 passed this verification) | ✅ COMPLIANT |
+| 2 | Tracer Loop Proof | Note content and path on disk | `e2e/tracer.test.ts > happy-path loop > persists the note on disk and round-trips title and body` | ✅ COMPLIANT |
+| 3 | Fixture Isolation | Isolation canary | `e2e/tracer.test.ts > isolation > does not leak .qmd artifacts outside the fixture` + `keeps the fixture-local qmd index`; canary snapshotted in `beforeAll` (0beca07); global-index isolation independently re-proven in round 2's manual recipe (byte-identical global index) | ✅ COMPLIANT |
+| 4 | Fixture Isolation | Teardown | **Re-proven this round**: in-suite `assertNoSurvivors` in every teardown path + external sweep 0→0 daemons, 0 `/tmp/ams-tracer-*`, 0 orphan cwds around a clean run (was N-1 FAILING) | ✅ COMPLIANT |
+| 5 | Lifecycle and Readiness | Successful boot | `e2e/tracer.test.ts > lifecycle and readiness > knows both bound ports and has a connected MCP client` | ✅ COMPLIANT |
+| 6 | Lifecycle and Readiness | Chosen daemon port is taken | `e2e/tracer.test.ts > lifecycle and readiness > retries daemon boot when the probed port is already taken` (now cleans up via `killProcessTree` + `assertNoSurvivors`) | ✅ COMPLIANT |
+| 7 | Failure Mode Assertions | Concurrent same-note writes serialize | `e2e/failure-modes.test.ts > lock contention > serializes two concurrent record_note calls for the same note` | ✅ COMPLIANT |
+| 8 | Failure Mode Assertions | QMD down | `e2e/failure-modes.test.ts > qmd down > maps search_memory to a structured error and keeps the server alive` | ✅ COMPLIANT |
+| 9 | Tracer Entrypoint | Tracer run on a prepared machine | This verification: `pnpm tracer` → 9/9 passed, exit 0 | ✅ COMPLIANT |
+| 10 | Tracer Entrypoint | Missing qmd binary | Re-proven this round: restricted-PATH `e2e/precheck.mjs` → exact message, exit 1 before vitest startup | ✅ COMPLIANT |
+| 11 | Tracer Entrypoint | Default suite untouched | `git diff main..HEAD -- vitest.config.ts` empty; `vitest list` → 0 e2e files; 149 passed | ✅ COMPLIANT |
+| 12 | Tracer Runbook | Manual reproduction | Runbook spot-proof this round: cwd-scoped API start (`cd "$V"` before `node …/dist/server.js`, lines 59–67) and the initialize → `mcp-session-id` → `tools/call` handshake (lines 90–107) are intact; full recipe empirically re-proved end-to-end in round 2 with zero global-index mutation (cited, not redone — no doubts) | ✅ COMPLIANT |
+| 13 | Tracer Runbook | First-run model download is documented | `docs/tracer-runbook.md` §First-run cost: ~300 MB model, ~2 GB full set, `~/.cache/qmd/models/`, "first run can take several minutes" | ✅ COMPLIANT |
 
-**Compliance summary**: 12/13 scenarios compliant, 1 failing (Teardown — N-1)
+**Compliance summary**: 13/13 scenarios compliant, 6/6 requirements compliant.
 
 ## Correctness (Static Evidence)
 
 | Aspect | Status | Notes |
 |--------|--------|-------|
-| Isolation spawn trace | ✅ Implemented | Every qmd-spawning path pinned to fixture cwd (`vault.ts:79-83,184-188,198-218`); args as arrays, no shell; `precheck.mjs` version-print unpinned per ADR-2 |
-| Canary coverage incl. W-1 fix | ✅ Implemented | `vault.ts:146-153`: non-null branch compares mtime+size; null branch now throws `Global QMD index was created` if the index appears — still-absent is asserted, not skipped. (Null branch not runtime-exercisable on this machine — global index pre-exists — verified by code reading + suite pass) |
-| Production reindex cwd | ✅ As designed | `createExecRunner` passes no cwd (`cli-reindexer.ts:59-80`) → inherits API process cwd; the fixed runbook starts the API inside `$V`, which this verification proved makes `qmd update`/`qmd embed` resolve `$V/.qmd` |
-| Runbook correctness | ✅ Fixed (f0ed83a) | Env names, routes, dist paths, cwd-scoped API start, two-step MCP handshake all verified empirically this run |
-| Daemon teardown | ❌ Defective | `teardown()` SIGTERM→(SIGKILL)→rm targets only the spawned supervisor pid (`vault.ts:307-315`); qmd forks a socket-holding worker ("MainThread") that survives both signals to the parent — see N-1 |
+| Tree-kill teardown (N-1 fix) | ✅ Implemented | `detached: true` spawn → own process group; `killProcessTree` SIGTERM→SIGKILL to `-pgid` with `/proc` group-empty poll; ESRCH tolerated for idempotency; retry path of `startQmdDaemon` also uses `killProcessTree` (no orphans on EADDRINUSE retries) |
+| Zero-survivor assertion (N-1 fix) | ✅ Implemented and live | `/proc/*/cmdline` (`qmd.js` + `mcp`) + `/proc/*/cwd` inside fixture root (with `(deleted)` suffix stripped — the exact round-2 leak signature); throws, not logs; runs in both teardown call sites |
+| `processesInPgid` field note | ✅ Correct in practice | It reads the post-`comm` stat slot at index 3, which is the *session* id rather than pgrp (index 2); for a `detached` (setsid) child and its fork descendants session == pgrp, so the poll is equivalent here — and in the only hypothetical divergence (a descendant calling `setsid`) both indices and the group signal miss together, leaving the cwd-based `assertNoSurvivors` as the backstop. Empirically moot: 0 survivors under all three external checks |
+| Isolation spawn trace | ✅ Implemented | Every qmd-spawning path pinned to fixture cwd (`vault.ts` spawn/runQmd/createFixtureRunner); args as arrays, no shell; `precheck.mjs` version-print unpinned per ADR-2 |
+| Canary coverage incl. W-1 fix | ✅ Implemented | Null branch throws `Global QMD index was created`; snapshot moved to `beforeAll` (0beca07) to avoid same-file ordering flakiness |
+| Runbook correctness (incl. N-2 fix) | ✅ Verified | Env names, routes, dist paths, cwd-scoped API start, two-step MCP handshake, working daemon-cleanup patterns + self-match caution — all confirmed against live cmdlines this round |
 | Lock contention power | ✅ Implemented | `Promise.all` concurrency; 409 regression → `isError` failure; lost-update → recorded count ≠ 1 |
 | QMD-down dead port | ✅ Implemented | `freePort()` releases socket, nothing rebinds |
 | Default suite separation | ✅ Implemented | Standalone tracer config; root include `packages/**` only |
@@ -141,82 +149,52 @@ verbatim by a human, and the recipe never touches the global index.**
 
 | Decision | Followed? | Notes |
 |----------|-----------|-------|
-| ADR-1: root devDep `@hono/node-server`, fixture calls `serve()` | ✅ Yes | `^2.0.6` present; second root devDep `@modelcontextprotocol/sdk@1.29.0` now recorded (S-1 resolved in tasks.md Remediation) |
+| ADR-1: root devDep `@hono/node-server`, fixture calls `serve()` | ✅ Yes | Both root devDeps recorded (`^2.0.6`, SDK `1.29.0`) |
 | ADR-2: self-contained tracer config + precheck script chain | ✅ Yes | Three aliases redeclared; own include; 180 s/60 s timeouts; precheck exact message before vitest |
-| ADR-3: probe + bind-failure retry + `isReachable()` backoff | ✅ Yes | `vault.ts:72-127` (3 attempts), readiness poll 250 ms ×1.5 cap 2 s / 15 s |
-| ADR-4: single-module fixture builder | ✅ Yes | Interface, builders, boot order and teardown order match design (teardown order itself is where N-1 lives — the design did not anticipate qmd's internal fork) |
+| ADR-3: probe + bind-failure retry + `isReachable()` backoff | ✅ Yes | Retry path now tree-kills failed attempts (0beca07) |
+| ADR-4: single-module fixture builder | ✅ Yes | Interface, builders, boot order and teardown order match design; teardown now implements group-kill + survivor assertion within the same structure |
 | ADR-5: pass `qmdClient` instance, not `qmdUrl` | ✅ Yes | `createMcpServer({ apiUrl, qmdClient })`; QMD-down uses dead-port instance |
 | Test file layout / threat matrix | ✅ Yes | Layout matches design §Test File Layout; all spawns array-argv |
 
-## Findings
+## Findings — all RESOLVED
 
-### Previous findings — all RESOLVED
+### Round 2 (verified resolved this round)
 
-- **C-1 (CRITICAL, resolved by `f0ed83a`)**: Runbook manual reproduction now works verbatim.
-  C-1a (reindex no-op for `$V`) — fixed by starting the API with cwd inside `$V`; this
-  verification observed `{"status":"ok","indexed":1}` into `$V/.qmd` with the global index
-  byte-identical (stat identical at baseline, pre-reindex, post-reindex ×2, post-cleanup).
-  C-1b (session-less query rejected) — fixed by the initialize → `mcp-session-id` →
-  `tools/call` two-step curl; executed exactly as written, query returned the note at
-  score 1. Independently re-proved; see transcript above.
-- **W-1 (WARNING, resolved by `86997e2`)**: `e2e/fixtures/vault.ts:151-153` — the null
-  global-index branch now asserts still-absent (`Global QMD index was created` guard).
-  Suite passes with the hardened canary.
-- **S-1 (SUGGESTION, resolved by `f0ed83a`)**: `tasks.md` §Remediation records the
-  `@modelcontextprotocol/sdk@1.29.0` second root devDep and why it is needed.
-- **S-2 (SUGGESTION, resolved by `f0ed83a`)**: runbook §Troubleshooting now documents
-  leaked-daemon and stale-collection hygiene — but the delivered command is itself
-  defective; see N-2.
+- **N-1 (CRITICAL, resolved by `0beca07`)**: Teardown leaked live qmd daemon workers on
+  every clean run. Fixed by detached spawn + process-group tree-kill + in-suite
+  `assertNoSurvivors`. Independently re-proven this round: 0 → 0 daemons around a clean
+  `pnpm tracer`, zero temp dirs, zero orphan cwds; live group-kill experiment confirmed the
+  forked worker dies with the group; the scenario now has an automated covering assertion
+  (round 2's "no covering test" gap closed).
+- **N-2 (WARNING, resolved by `3f666a0`)**: Runbook cleanup hint matched zero real
+  daemons. Fixed to `pgrep -af qmd` / `pkill -f "qmd.js mcp"` + self-match caution.
+  Verified against observed live cmdlines; the caution's mechanism was live-demonstrated
+  during this verification's own probing.
 
-### CRITICAL (new)
+### Round 1 (resolved earlier; spot-checked this round)
 
-**N-1 — Teardown leaks live qmd daemon workers on every clean run (scenario FAILING).**
-`qmd mcp --http` (2.5.3) forks an internal worker process (the `MainThread` process that
-actually holds the listening socket). The fixture's `teardown()` and the port-taken test
-kill only the pid they spawned (`vault.ts:307-315`, `tracer.test.ts:135-136`); the worker
-survives SIGTERM/SIGKILL to its parent, is reparented to init, keeps LISTENing on its
-port, and keeps its (deleted) fixture cwd. Empirical evidence from THIS verification:
-`pnpm tracer` (clean, exit 0, 14:07:45–14:07:54) left 6 live daemons — pids
-1934454 (:46427), 1934467 (:38071), 1934597 (:36979), 1934769 (:44315), 1934805 (:42445),
-1934900 (:46647), cwds `/tmp/ams-tracer-*`/`ams-tracer-port-*` (deleted) — still alive
-8+ minutes after the run ended; identical 6-daemon cohorts from the clean runs at 13:37,
-14:02 and 14:04 confirm this is every clean run, not a one-off (≈58 orphaned qmd daemons
-now accumulated on this machine). This verification's manual recipe independently
-reproduced the mechanism: killing the daemon's parent pid left the worker holding 8184.
-The previous verification's "zero qmd processes left by the run" Teardown evidence was a
-faulty sweep — its pattern did not match worker cmdlines — and the scenario has no
-automated covering test, so nothing in the suite catches it. *Remediation direction (not
-applied)*: kill the whole process tree — spawn the daemon `detached: true` so it gets its
-own process group and teardown kills `-pgid` (SIGTERM then SIGKILL), and/or add a covering
-assertion that no live process has a cwd under the fixture root after teardown (scan
-`/proc/*/cwd`), which would also have caught this at test time.
+- **C-1 (CRITICAL, resolved by `f0ed83a`)**: Runbook manual reproduction works verbatim —
+  cwd-scoped API start and initialize/`mcp-session-id` handshake confirmed intact in the
+  runbook this round; full empirical re-proof cited from round 2 (loop observed by hand,
+  global index byte-identical throughout).
+- **W-1 (WARNING, resolved by `86997e2`)**: isolation canary null-branch guard present and
+  suite passes with it.
+- **S-1 (SUGGESTION, resolved by `f0ed83a`)**: second root devDep recorded in tasks.md.
+- **S-2 (SUGGESTION, resolved by `f0ed83a`, superseded fix in `3f666a0`)**: troubleshooting
+  hints present; the delivered commands now actually work (N-2 verification above).
 
-### WARNING (new)
+### Open findings
 
-**N-2 — Runbook cleanup hint matches zero daemons on qmd 2.5.3.** The S-2 remediation
-(`docs/tracer-runbook.md:141-143`) says `pgrep -af "qmd mcp"`, but real daemon cmdlines
-are `node …/qmd.js mcp --http --port N` — the substring `qmd mcp` never occurs, so the
-command run interactively lists nothing while 58 daemons run (verified empirically this
-session). Additionally, even with a working listing, killing only the listed parent pid
-leaves the socket-holding worker alive (observed on 8184 during this verification's
-cleanup). Use `pgrep -af qmd` to list and `pkill -f "qmd.js mcp"` to stop them.
-
-### SUGGESTION
-
-- The suite should own the Teardown guarantee as a test (see N-1 direction) rather than
-  relying on verifier observation — the observation failed once already.
-- This machine needs one-time manual hygiene: ~58 orphaned qmd daemons and 5 stale
-  `/tmp/ams-tracer-*` dirs (13:17–13:26 apply-era interruptions). Environmental; not
-  caused by committed code, but every future `pnpm tracer` run adds ~6 more until N-1
-  is fixed.
+None. One non-blocking observation (`processesInPgid` reads session id where the name says
+pgrp — equivalent under `detached`/setsid semantics, backstopped by the cwd-based
+assertion) is recorded in the Correctness table; it affects no scenario.
 
 ## Verdict
 
-**FAIL** — 12/13 scenarios compliant. All four previously reported findings (C-1, W-1,
-S-1, S-2) are independently confirmed resolved — C-1 by fresh empirical execution of the
-fixed runbook recipe with zero global-index mutation — and all gates pass (`pnpm check` /
-`pnpm typecheck` / `pnpm test` 149 / `pnpm tracer` 9/9, all exit 0). The change is **not
-archive-ready**: new N-1 shows the Teardown scenario is empirically false (≈6 live
-daemon leaks per clean run), which the prior verification's faulty process sweep missed.
-Remediate N-1 (tree-kill teardown + covering assertion) and N-2 (working cleanup
-command), then re-verify.
+**PASS** — 13/13 scenarios compliant, 6/6 requirements, 34/34 tasks complete. All gates
+green (`pnpm check` / `pnpm typecheck` / `pnpm test` 149 / `pnpm tracer` 9/9, all exit 0).
+Both round-2 findings independently re-proven fixed: zero process/dir/cwd survivors around
+a clean tracer run (0 before → 0 after, three independent detection methods), and runbook
+cleanup patterns verified against real daemon cmdlines. Round-1 findings remain resolved
+(intact this round; C-1's full empirical re-proof cited from round 2). The change is
+**archive-ready**.
