@@ -1,0 +1,36 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Node.js >= 22, TypeScript (strict, composite project references), pnpm workspaces, ESM (NodeNext)
+  Architecture: Monorepo — packages/shared (types & schemas), packages/api (Write API + indexing), packages/mcp (MCP server)
+  Retrieval: QMD daemon (MCP-over-HTTP, BM25 + vector fusion via RRF, rerank off by default)
+  Testing: Vitest (root config, alias @ams/shared -> source)
+  Lint/Format: Biome (double quotes, semicolons, 2-space, lineWidth 100)
+  Commits: Conventional Commits (commitlint + husky)
+  Language policy: All code, comments, identifiers, docs, commits, PRs in English
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing code patterns
+    - Use .js extensions in relative imports (NodeNext)
+    - Group and sort imports per Biome organizeImports
+    - Prefer import type for type-only imports
+    tdd: false
+    test_command: "pnpm test"
+  verify:
+    test_command: "pnpm test"
+    build_command: "pnpm typecheck"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas

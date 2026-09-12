@@ -8,6 +8,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@ams/api": new URL("./packages/api/src/index.ts", import.meta.url).pathname,
       "@ams/shared": new URL("./packages/shared/src/index.ts", import.meta.url).pathname,
     },
   },

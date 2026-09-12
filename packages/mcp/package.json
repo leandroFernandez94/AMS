@@ -14,11 +14,17 @@
   "files": [
     "dist"
   ],
+  "bin": {
+    "ams-mcp": "./dist/bin.js"
+  },
   "scripts": {
     "build": "tsc --build",
     "typecheck": "tsc --build"
   },
   "dependencies": {
-    "@ams/shared": "workspace:*"
+    "@ams/api": "workspace:*",
+    "@ams/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "^4.4.3"
   }
 }
