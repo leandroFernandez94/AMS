@@ -46,9 +46,9 @@ Chain strategy: size-exception
 
 ## Phase 4: Failure Modes (adversarial assertions)
 
-- [ ] 4.1 Create `e2e/failure-modes.test.ts` — `describe("lock contention")`: `beforeAll` boots a fixture, `afterAll` tears down. Test: `Promise.all` of two `fx.mcp.callTool("record_note", { title: "same", type: "note", body: "same" })` → assert exactly one response matches `/Note recorded:/` and exactly one matches `/Note updated:/`, neither has `isError: true`, exactly one file on disk for that note. Covers Scenario: Concurrent same-note writes serialize (FIFO).
-- [ ] 4.2 `describe("qmd down")`: build a throwaway MCP server with `new QmdClient({ url: "http://127.0.0.1:<deadPort>" })` (port from `freePort()`, never bound) + same `apiUrl`. Call `search_memory` → assert `isError === true` and text contains `QMD retrieval unavailable`. Follow-up: `record_note` on the same throwaway server succeeds → proves "MCP server keeps running". Covers Scenario: QMD down.
-- [ ] 4.3 Verify: `pnpm tracer` runs and all tests in `e2e/failure-modes.test.ts` pass.
+- [x] 4.1 Create `e2e/failure-modes.test.ts` — `describe("lock contention")`: `beforeAll` boots a fixture, `afterAll` tears down. Test: `Promise.all` of two `fx.mcp.callTool("record_note", { title: "same", type: "note", body: "same" })` → assert exactly one response matches `/Note recorded:/` and exactly one matches `/Note updated:/`, neither has `isError: true`, exactly one file on disk for that note. Covers Scenario: Concurrent same-note writes serialize (FIFO).
+- [x] 4.2 `describe("qmd down")`: build a throwaway MCP server with `new QmdClient({ url: "http://127.0.0.1:<deadPort>" })` (port from `freePort()`, never bound) + same `apiUrl`. Call `search_memory` → assert `isError === true` and text contains `QMD retrieval unavailable`. Follow-up: `record_note` on the same throwaway server succeeds → proves "MCP server keeps running". Covers Scenario: QMD down.
+- [x] 4.3 Verify: `pnpm tracer` runs and all tests in `e2e/failure-modes.test.ts` pass.
 
 ## Phase 5: Runbook (documentation)
 
