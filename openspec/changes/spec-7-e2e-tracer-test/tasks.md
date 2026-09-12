@@ -69,3 +69,9 @@ Chain strategy: size-exception
 - [x] W-1: Close the isolation canary blind spot by asserting the global index stays absent when it was absent at snapshot.
 - [x] S-1: Record that `@modelcontextprotocol/sdk@1.29.0` was added as a second root devDep (tracer config resolves @ams/mcp source directly; SDK not hoisted).
 - [x] S-2: Add runbook troubleshooting hints for leaked qmd daemons and stale global collections.
+
+## Remediation Round 2
+
+- [x] N-1(a): Spawn QMD daemon detached (own process group) and tree-kill the group in `teardown()`.
+- [x] N-1(b): Add zero-survivor assertion that scans `/proc/*/cmdline` + `/proc/*/cwd` and fails if any qmd worker leaks.
+- [x] N-2: Replace broken `pgrep -af "qmd mcp"` runbook hint with working `pgrep -af qmd` / `pkill -f "qmd.js mcp"` patterns plus shell self-match caution.

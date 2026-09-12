@@ -1,5 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -80,6 +80,7 @@ export async function startQmdDaemon(
       cwd,
       env: { ...process.env, PWD: cwd },
       stdio: ["ignore", "ignore", "pipe"],
+      detached: true,
     });
 
     let stderr = "";
@@ -117,8 +118,7 @@ export async function startQmdDaemon(
     }
 
     lastError = stderr.trim();
-    child.kill("SIGTERM");
-    await new Promise((r) => setTimeout(r, 100));
+    await killProcessTree(child);
     if (!lastError.includes("EADDRINUSE") && attempt === 3) {
       throw new Error(`qmd daemon failed to start: ${lastError}`);
     }
@@ -217,6 +217,101 @@ function createFixtureRunner(cwd: string) {
   };
 }
 
+/** Returns pids whose process group id equals `pgid`. */
+function processesInPgid(pgid: number): number[] {
+  const pids: number[] = [];
+  try {
+    for (const entry of readdirSync("/proc")) {
+      const pid = Number.parseInt(entry, 10);
+      if (!Number.isFinite(pid)) continue;
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const afterComm = stat.lastIndexOf(")");
+        const fields = stat.slice(afterComm + 2).split(" ");
+        if (Number.parseInt(fields[3] ?? "", 10) === pgid) {
+          pids.push(pid);
+        }
+      } catch {
+        // process vanished or unreadable
+      }
+    }
+  } catch {
+    // /proc unreadable
+  }
+  return pids;
+}
+
+/**
+ * Kills a detached process and every descendant in its process group.
+ *
+ * Sends SIGTERM first, waits up to 5 s for the supervisor to exit, then
+ * escalates to SIGKILL. Polls /proc until the process group is empty so the
+ * caller can assume no survivors. ESRCH is tolerated for idempotency.
+ */
+export async function killProcessTree(child: ChildProcess): Promise<void> {
+  if (!child.pid) return;
+  const pgid = child.pid;
+
+  const signal = (name: NodeJS.Signals) => {
+    try {
+      process.kill(-pgid, name);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") return true;
+      throw err;
+    }
+  };
+
+  signal("SIGTERM");
+  await Promise.race([
+    new Promise<void>((resolve) => child.once("exit", () => resolve())),
+    new Promise<void>((_, reject) => setTimeout(() => reject(new Error("teardown timeout")), 5000)),
+  ]).catch(() => {
+    signal("SIGKILL");
+  });
+
+  for (let i = 0; i < 30; i++) {
+    if (processesInPgid(pgid).length === 0) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  signal("SIGKILL");
+}
+
+/**
+ * Asserts that no qmd daemon worker leaked for `root`.
+ *
+ * Scans /proc for processes whose cmdline contains `qmd.js mcp` and whose
+ * cwd (including deleted cwd paths) points inside the fixture root.
+ */
+export function assertNoSurvivors(root: string): void {
+  const survivors: number[] = [];
+  try {
+    for (const entry of readdirSync("/proc")) {
+      const pid = Number.parseInt(entry, 10);
+      if (!Number.isFinite(pid)) continue;
+      try {
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+        if (!cmdline.includes("qmd.js") || !cmdline.includes("mcp")) continue;
+
+        const cwd = readlinkSync(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, "");
+        if (cwd === root || cwd.startsWith(`${root}/`)) {
+          survivors.push(pid);
+        }
+      } catch {
+        // process vanished or not readable — ignore
+      }
+    }
+  } catch {
+    // /proc unreadable — cannot verify, do not fail the test
+  }
+
+  if (survivors.length > 0) {
+    throw new Error(
+      `Leaked ${survivors.length} qmd daemon worker(s) for fixture ${root}: ${survivors.join(", ")}`,
+    );
+  }
+}
+
 /** Polls the daemon until `QmdClient#isReachable()` succeeds or the cap hits. */
 async function waitForReachable(client: QmdClient, timeoutMs = 15_000): Promise<void> {
   const started = Date.now();
@@ -304,16 +399,9 @@ export async function createTracerFixture(): Promise<TracerFixture> {
       } catch {
         /* best effort */
       }
-      if (child && !child.killed) {
-        child.kill("SIGTERM");
-        await Promise.race([
-          new Promise<void>((resolve) => child.once("exit", () => resolve())),
-          new Promise<void>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
-        ]).catch(() => {
-          child.kill("SIGKILL");
-        });
-      }
+      await killProcessTree(child);
       await rm(root, { recursive: true, force: true });
+      assertNoSurvivors(root);
     },
   };
 }
