@@ -1,0 +1,12 @@
+change: spec-7-e2e-tracer-test
+status: archived
+created: 2026-09-12
+archived: 2026-09-12
+issue: 6
+milestone: Tracer Bullet
+artifact_store: openspec
+delivery_strategy: size:exception
+review_budget_lines: 400
+chain_strategy: ~
+branch: feat/spec-7-e2e-tracer-test
+final_verdict: pass
