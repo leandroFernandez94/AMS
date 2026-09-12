@@ -1,6 +1,7 @@
 change: spec-6-mcp-server
-status: applying
+status: archived
 created: 2026-07-11
+archived: 2026-07-27
 issue: 7
 milestone: Tracer Bullet
 artifact_store: openspec
