@@ -7,9 +7,11 @@ import { QmdClient } from "@ams/api";
 import { parseNote } from "@ams/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  assertNoSurvivors,
   createIsolationCanary,
   createTracerFixture,
   freePort,
+  killProcessTree,
   startQmdDaemon,
 } from "./fixtures/vault.js";
 
@@ -132,18 +134,19 @@ describe("lifecycle and readiness", () => {
     const client = new QmdClient({ url });
     await expect(client.isReachable()).resolves.toBe(true);
 
-    child.kill("SIGTERM");
-    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    await killProcessTree(child);
     occupant.close();
     await rm(root, { recursive: true, force: true });
+    assertNoSurvivors(root);
   });
 });
 
 describe("isolation", () => {
   let fx: Awaited<ReturnType<typeof createTracerFixture>>;
-  const canary = createIsolationCanary();
+  let canary: ReturnType<typeof createIsolationCanary>;
 
   beforeAll(async () => {
+    canary = createIsolationCanary();
     fx = await createTracerFixture();
   }, 60_000);
 
