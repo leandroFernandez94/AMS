@@ -138,6 +138,10 @@ Then connect any MCP client (e.g., the MCP inspector) and call:
 
 To see daemon logs, run `qmd mcp --http --port <port>` in the foreground and watch stderr.
 
-To clean up leaked qmd daemons, run `pgrep -af "qmd mcp"` to list them and
-`kill <pid>` to stop one. If a dev run polluted the global registry, remove
-the stale collection with `qmd collection remove <name>` and then `qmd update`.
+To clean up leaked qmd daemons, run `pgrep -af qmd` to list them and
+`pkill -f "qmd.js mcp"` to stop them. Run `pkill` directly in the shell,
+not nested inside another command string, or the shell matching the same
+pattern may terminate itself.
+
+If a dev run polluted the global registry, remove the stale collection with
+`qmd collection remove <name>` and then `qmd update`.
