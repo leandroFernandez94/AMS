@@ -148,6 +148,8 @@ export function createIsolationCanary(): { assertUnchanged(): void } {
         if (now.mtimeMs !== globalStat.mtimeMs || now.size !== globalStat.size) {
           throw new Error(`Global QMD index changed: ${globalIndexPath}`);
         }
+      } else if (existsSync(globalIndexPath)) {
+        throw new Error(`Global QMD index was created: ${globalIndexPath}`);
       }
       if (!repoHadQmd && existsSync(join(repoRoot, ".qmd"))) {
         throw new Error("Repo root .qmd appeared");
