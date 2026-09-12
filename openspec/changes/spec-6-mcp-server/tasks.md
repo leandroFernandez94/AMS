@@ -54,3 +54,10 @@ Single PR approved; all phases implemented in one batch.
 
 - [x] 6.1 Run `pnpm typecheck && pnpm test && pnpm check`; confirm all 12 spec scenarios green
 - [x] 6.2 Verify issue #7 acceptance: three tools listed; `record_note` creates any `type`; `search_memory` readable; `rerank` forwarded; upstream down → structured MCP errors; process never crashes
+
+## Phase 7: Post-Verify Remediation
+
+- [x] 7.1 W-1: Map `fetch` network errors to `"Write API unavailable"` per ADR-4; update matching test expectation
+- [x] 7.2 W-2: Add malformed Write API payload guard test
+- [x] 7.3 S-1: Align `@ams/mcp` zod version with workspace (`^4.4.3`) and verify SDK types still pass
+- [x] 7.4 S-2: Add `test-vault/` to `.gitignore`
