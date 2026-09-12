@@ -24,6 +24,7 @@
     "@commitlint/cli": "^21.2.0",
     "@commitlint/config-conventional": "^21.2.0",
     "@hono/node-server": "^2.0.6",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@types/node": "^26.0.1",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
