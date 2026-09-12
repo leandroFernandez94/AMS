@@ -20,6 +20,9 @@ coverage/
 # SDD local artifacts
 .atl/
 
+# Local verification vaults
+test-vault/
+
 # OS / Editor
 .DS_Store
 Thumbs.db

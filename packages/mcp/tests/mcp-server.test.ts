@@ -188,7 +188,21 @@ describe("record_note", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toBe("Internal error");
+    expect(result.content[0]?.text).toBe("Write API unavailable");
+  });
+
+  it("returns an error when the Write API returns a malformed payload", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "body" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API returned an unexpected payload");
   });
 
   it("rejects a missing required field before calling upstream", async () => {
