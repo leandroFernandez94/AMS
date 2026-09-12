@@ -16,12 +16,14 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
+    "tracer": "node e2e/precheck.mjs && vitest run --config vitest.tracer.config.ts",
     "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
     "@commitlint/cli": "^21.2.0",
     "@commitlint/config-conventional": "^21.2.0",
+    "@hono/node-server": "^2.0.6",
     "@types/node": "^26.0.1",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
