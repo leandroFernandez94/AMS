@@ -9,9 +9,7 @@ import {
 
 describe("stripQmdUri", () => {
   it("strips the qmd:// scheme and the collection segment", () => {
-    expect(stripQmdUri("qmd://ams-test-vault/decisions/2026-07-01-x.md")).toBe(
-      "decisions/2026-07-01-x.md",
-    );
+    expect(stripQmdUri("qmd://ams-test-vault/decisions/use-qmd.md")).toBe("decisions/use-qmd.md");
   });
 
   it("strips the collection segment from a bare collection/path form", () => {
@@ -47,7 +45,7 @@ describe("mapSearchResults", () => {
         {
           docid: "#abc123",
           score: 0.89,
-          file: "ams-test-vault/decisions/2026-07-01-use-qmd.md",
+          file: "ams-test-vault/decisions/use-qmd.md",
           title: "Use QMD for retrieval",
           snippet: "We will use QMD as the local engine.",
         },
@@ -56,7 +54,7 @@ describe("mapSearchResults", () => {
     expect(mapSearchResults(payload)).toEqual<MemoryHit[]>([
       {
         id: "#abc123",
-        path: "decisions/2026-07-01-use-qmd.md",
+        path: "decisions/use-qmd.md",
         title: "Use QMD for retrieval",
         snippet: "We will use QMD as the local engine.",
         score: 0.89,

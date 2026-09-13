@@ -1,10 +1,11 @@
 /**
  * Deterministic slug and id derivation for notes.
  *
- * The canonical id of a note combines an ISO date with a slug derived
- * from the title. The rule is deterministic: the same (title, date) pair
- * always yields the same id and therefore the same vault path, enabling
- * idempotent upserts without extra state.
+ * The canonical id of a note is the slug derived from its title. The rule
+ * is deterministic: the same title always yields the same id and therefore
+ * the same vault path, enabling idempotent upserts without extra state
+ * and unambiguous wikilink resolution. The creation date lives in
+ * `frontmatter.date` only — it does not participate in the id.
  */
 
 /**
@@ -34,24 +35,22 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Validates that a value matches the strict ISO `YYYY-MM-DD` format.
  * Does not validate calendar range (the persistence layer may do so if
- * needed); only the canonical format required to derive stable ids.
+ * needed); only the canonical format required for the frontmatter `date`
+ * field.
  */
 export function isIsoDate(value: string): boolean {
   return ISO_DATE_RE.test(value);
 }
 
 /**
- * Derives the canonical id `<YYYY-MM-DD>-<slug(title)>`.
- * Throws if the date is not valid ISO or if the slug ends up empty
- * (a title with no usable alphanumeric content).
+ * Derives the canonical id `<slug(title)>`.
+ * Throws if the slug ends up empty (a title with no usable alphanumeric
+ * content).
  */
-export function deriveId(title: string, date: string): string {
-  if (!isIsoDate(date)) {
-    throw new Error(`Invalid ISO date: ${date}`);
-  }
+export function deriveId(title: string): string {
   const slug = slugify(title);
   if (slug === "") {
     throw new Error(`Title produces empty slug: ${JSON.stringify(title)}`);
   }
-  return `${date}-${slug}`;
+  return slug;
 }
