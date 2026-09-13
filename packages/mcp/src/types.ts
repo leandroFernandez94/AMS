@@ -2,7 +2,7 @@ import type { QmdClient } from "@ams/api";
 
 /** Injectable collaborators for `createServer`. All optional — production resolves from env. */
 export interface ServerDeps {
-  /** Write API base URL. Defaults to env `AMS_API_URL`. Required for `record_note`. */
+  /** Write API base URL. Defaults to env `AMS_API_URL`. Required for write-side tools. */
   apiUrl?: string;
   /** QMD client. When omitted, built lazily from `AMS_QMD_URL` on first read. */
   qmdClient?: QmdClient;

@@ -77,18 +77,23 @@ afterEach(() => {
 // -----------------------------------------------------------------------------
 
 describe("tool catalog", () => {
-  it("lists exactly three tools with descriptions and typed schemas", async () => {
+  it("lists exactly four tools with descriptions and typed schemas", async () => {
     const server = createServer();
     const client = await createTestClient(server);
 
     const result = await client.listTools();
 
     const names = result.tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(["get_memory", "record_note", "search_memory"]);
+    expect(names).toEqual(["get_memory", "list_types", "record_note", "search_memory"]);
     for (const tool of result.tools) {
       expect(tool.description).toBeTruthy();
       expect(tool.inputSchema.type).toBe("object");
-      expect(Object.keys(tool.inputSchema.properties ?? {})).not.toHaveLength(0);
+    }
+    // Argument-bearing tools must describe their inputs; list_types legitimately
+    // takes no arguments.
+    for (const name of ["get_memory", "record_note", "search_memory"]) {
+      const tool = result.tools.find((t) => t.name === name);
+      expect(Object.keys(tool?.inputSchema.properties ?? {})).not.toHaveLength(0);
     }
   });
 });
@@ -343,6 +348,98 @@ describe("record_note", () => {
       name: "record_note",
       arguments: { title: "Hello", type: "note", body: "body" },
     });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// list_types
+// -----------------------------------------------------------------------------
+
+describe("list_types", () => {
+  it("calls GET /types on the Write API and returns the type list", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: true,
+      status: 200,
+      json: { types: ["decision", "learning", "pattern"] },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
+
+    expect(lastRequest()?.url).toBe("http://localhost:3000/types");
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0]?.text as string;
+    expect(text).toContain("decision");
+    expect(text).toContain("learning");
+    expect(text).toContain("pattern");
+  });
+
+  it("instructs agents to prefer existing types in the description", async () => {
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch: vi.fn() });
+    const client = await createTestClient(server);
+
+    const result = await client.listTools();
+    const tool = result.tools.find((t) => t.name === "list_types");
+    expect(tool).toBeTruthy();
+    expect(tool?.description).toContain("prefer an existing type");
+  });
+
+  it("returns a non-error message for an empty type list", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { types: [] } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toBe("No note types exist in the vault yet");
+  });
+
+  it("returns an unavailable error on Write API 500", async () => {
+    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable: 500");
+  });
+
+  it("returns an unavailable error when fetch throws", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("connection refused");
+    }) as unknown as typeof globalThis.fetch;
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable");
+  });
+
+  it("returns an error when the Write API returns a malformed payload", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API returned an unexpected payload");
+  });
+
+  it("fails when AMS_API_URL is not configured", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { types: [] } });
+    const server = createServer({ apiUrl: "", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");

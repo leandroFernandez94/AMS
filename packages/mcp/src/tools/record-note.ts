@@ -11,7 +11,13 @@ export interface RecordNoteDeps {
 
 const inputSchema = {
   title: z.string().min(1).describe("Short, searchable title"),
-  type: z.string().min(1).describe("Note type: decision, learning, pattern, note, task, ..."),
+  type: z
+    .string()
+    .min(1)
+    .describe(
+      "Note type: decision, learning, pattern, note, task, ... " +
+        "Prefer a type returned by list_types; only invent a new one when none fits",
+    ),
   body: z.string().describe("Free-form markdown body"),
   topic_key: z
     .string()

@@ -68,6 +68,13 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/health", (c) => c.json({ status: "ok" }));
 
+  app.get("/types", async (c) => {
+    // Live first-level directory scan via the vault — authoritative with no
+    // index dependency, so it works even before the first reindex.
+    const types = await deps.vault.listTypes();
+    return c.json({ types });
+  });
+
   app.post("/notes", async (c) => recordNote(c, deps));
 
   app.post("/admin/reindex", async (c) => {
