@@ -16,7 +16,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export interface DirtyEntry {
-  /** Relative path of the note inside the vault, e.g. "decisions/2026-07-01-x.md". */
+  /** Relative path of the note inside the vault, e.g. "decisions/use-qmd.md". */
   path: string;
   /** Epoch millis when the path was marked dirty. */
   markedAt: number;
