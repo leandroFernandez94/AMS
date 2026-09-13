@@ -40,8 +40,8 @@ export class NoteParseError extends Error {
 // Frontmatter schema
 // ---------------------------------------------------------------------------
 
-/** Canonical id: <YYYY-MM-DD>-<slug>. Validated to guarantee idempotency. */
-const ID_RE = /^\d{4}-\d{2}-\d{2}-[a-z0-9]+(-[a-z0-9]+)*$/;
+/** Canonical id: bare slug derived from the title. Validated to guarantee idempotency. */
+const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /** Note type: lowercase, starts with a letter (decision, learning, pattern, ...). */
 const TYPE_RE = /^[a-z][a-z0-9-]*$/;
@@ -50,7 +50,7 @@ const TYPE_RE = /^[a-z][a-z0-9-]*$/;
 const TOPIC_KEY_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 
 export const FrontmatterSchema = z.object({
-  id: z.string().regex(ID_RE, "id must match <YYYY-MM-DD>-<slug>"),
+  id: z.string().regex(ID_RE, "id must be a slug derived from the title"),
   title: z.string().min(1, "title must be non-empty"),
   date: z.string().refine(isIsoDate, "date must be YYYY-MM-DD"),
   type: z.string().regex(TYPE_RE, "type must be lowercase, starting with a letter"),
@@ -94,7 +94,7 @@ export function buildNote(input: {
   tags?: string[];
   body: string;
 }): Note {
-  const id = deriveId(input.title, input.date);
+  const id = deriveId(input.title);
   const frontmatter: Frontmatter = {
     id,
     title: input.title,
@@ -220,13 +220,14 @@ function serializeFrontmatter(fm: Frontmatter): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Verifies that a note's id, date and title are coherent
- * (id === deriveId(title, date)). Useful in the Write API before persisting.
+ * Verifies that a note's id and title are coherent (id === deriveId(title))
+ * and that the date is a valid ISO date. Useful in the Write API before
+ * persisting.
  */
 export function isCoherent(note: Note): boolean {
   const { id, title, date } = note.frontmatter;
   if (!isIsoDate(date)) return false;
   const slug = slugify(title);
   if (slug === "") return false;
-  return id === `${date}-${slug}`;
+  return id === slug;
 }

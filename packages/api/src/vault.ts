@@ -42,7 +42,7 @@ export class Vault {
   async upsertNote(note: Note): Promise<UpsertResult> {
     if (!isCoherent(note)) {
       throw new Error(
-        `Refusing to persist incoherent note: id=${note.frontmatter.id} is not derived from title/date`,
+        `Refusing to persist incoherent note: id=${note.frontmatter.id} is not derived from the title`,
       );
     }
     const relPath = notePath(note.frontmatter.id, note.frontmatter.type);
