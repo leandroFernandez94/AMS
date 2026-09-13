@@ -11,7 +11,8 @@
  * caller is told whether the write created a new file or updated an existing
  * one, so the HTTP layer can answer 201 vs 200.
  */
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isCoherent, type Note, notePath, parseNote, serializeNote } from "@ams/shared";
 
@@ -23,6 +24,14 @@ export interface UpsertResult {
   path: string;
   /** True when a new file was created, false when an existing one was updated. */
   created: boolean;
+}
+
+/** A note located in the vault by its `topic_key`. */
+export interface TopicKeyMatch {
+  /** The parsed note that owns the key. */
+  note: Note;
+  /** Vault-relative path of the note file. */
+  path: string;
 }
 
 export class Vault {
@@ -61,6 +70,87 @@ export class Vault {
       return parseNote(source);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Finds the note whose `frontmatter.topic_key` exactly matches, across all
+   * types. Deterministic: every `*.md` under the vault root is visited in
+   * sorted path order and the first match wins.
+   *
+   * Tradeoff: a linear scan per topic-key write is O(vault size). At
+   * tracer-bullet scale (hundreds of notes) that is fine; replace with an
+   * index only when the vault grows enough for the scan to matter.
+   */
+  async findByTopicKey(topicKey: string): Promise<TopicKeyMatch | null> {
+    const paths: string[] = [];
+    await this.collectMarkdownPaths(".", paths);
+    paths.sort();
+    for (const relPath of paths) {
+      const source = await this.readRaw(relPath);
+      if (source === null) continue;
+      let note: Note;
+      try {
+        note = parseNote(source);
+      } catch {
+        // Not an AMS note (or corrupt frontmatter) — not ours to route.
+        continue;
+      }
+      if (note.frontmatter.topic_key === topicKey) {
+        return { note, path: relPath };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Reads the RAW markdown source at a vault-relative path (null if absent).
+   * Used to surface the exact on-disk content in conflict responses — raw
+   * bytes, never re-serialized, so the agent sees precisely what it collides
+   * with.
+   */
+  async readRaw(relPath: string): Promise<string | null> {
+    try {
+      return await readFile(join(this.root, relPath), "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Deletes the note file at a vault-relative path. Used by the rename flow
+   * (write the moved note first, then unlink the old file). Returns whether
+   * a file was actually removed.
+   */
+  async deleteNote(relPath: string): Promise<boolean> {
+    try {
+      await unlink(join(this.root, relPath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Recursively collects vault-relative paths of `*.md` files under `relDir`.
+   * Dot-directories (`.ams`, `.qmd`, ...) are skipped — they carry system
+   * state, not notes. Paths always use `/` separators to match `notePath()`.
+   */
+  private async collectMarkdownPaths(relDir: string, out: string[]): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(join(this.root, relDir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const rel = relDir === "." ? entry.name : `${relDir}/${entry.name}`;
+      if (entry.isDirectory()) {
+        await this.collectMarkdownPaths(rel, out);
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        out.push(rel);
+      }
     }
   }
 
