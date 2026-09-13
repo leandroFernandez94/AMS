@@ -132,6 +132,32 @@ export class Vault {
   }
 
   /**
+   * Lists the note types present in the vault, derived from the FIRST-LEVEL
+   * directories under the root. The directory scan is authoritative — it has
+   * no index dependency, so it answers correctly even before the first
+   * reindex, and an empty vault simply yields an empty list.
+   *
+   * Dot-directories (`.ams`, `.qmd`, ...) are skipped — they carry system
+   * state, not notes. Each directory name is singularized with the naive
+   * documented inverse of `notePath`'s `+s` rule; names that do not end in
+   * `s` (types that do not round-trip cleanly) are reported as-is.
+   */
+  async listTypes(): Promise<string[]> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(this.root, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const types = new Set<string>();
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      types.add(singularizeType(entry.name));
+    }
+    return [...types].sort();
+  }
+
+  /**
    * Recursively collects vault-relative paths of `*.md` files under `relDir`.
    * Dot-directories (`.ams`, `.qmd`, ...) are skipped — they carry system
    * state, not notes. Paths always use `/` separators to match `notePath()`.
@@ -170,4 +196,14 @@ export class Vault {
     // level for the tracer bullet; fsync is out of scope until needed.
     await writeFile(absPath, content, "utf8");
   }
+}
+
+/**
+ * Naive inverse of the `+s` pluralization used by `notePath`: strips one
+ * trailing `s`. Names that do not end in `s` (or are exactly `s`) are
+ * returned as-is so odd directories surface verbatim instead of being
+ * mangled into an empty or truncated type.
+ */
+function singularizeType(dirName: string): string {
+  return dirName.length > 1 && dirName.endsWith("s") ? dirName.slice(0, -1) : dirName;
 }
