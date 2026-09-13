@@ -139,6 +139,120 @@ describe("record_note", () => {
     expect(result.content[0]?.text).toBe("Note updated: abc123 at notes/2026-07-27-hello.md");
   });
 
+  it("reports a rename with moved_from in the success text", async () => {
+    const { fetch } = mockFetch({
+      ok: true,
+      status: 200,
+      json: {
+        id: "abc123",
+        path: "notes/renamed.md",
+        created: false,
+        moved_from: "notes/original.md",
+      },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Renamed",
+        type: "note",
+        body: "b",
+        topic_key: "topic/flow",
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toBe(
+      "Note updated: abc123 at notes/renamed.md (moved from notes/original.md)",
+    );
+  });
+
+  it("surfaces a 409 note_exists conflict as a non-error result with the old content and guidance", async () => {
+    const { fetch } = mockFetch({
+      ok: false,
+      status: 409,
+      json: {
+        error: "note_exists",
+        existing: {
+          id: "hello",
+          path: "notes/hello.md",
+          body: "---\nid: hello\n---\n\noriginal body",
+        },
+      },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "replacement body" },
+    });
+
+    // The conflict is a protocol outcome, NOT an error.
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0]?.text as string;
+    expect(text).toContain("already exists");
+    expect(text).toContain("hello");
+    expect(text).toContain("notes/hello.md");
+    expect(text).toContain("original body");
+    expect(text).toContain("retitle your note");
+    expect(text).toContain("overwrite: true");
+  });
+
+  it("keeps other 4xx/5xx statuses on the error path", async () => {
+    const { fetch } = mockFetch({ ok: false, status: 409, json: { error: "something_else" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "body" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable: 409");
+  });
+
+  it("passes overwrite through to the Write API payload", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: true,
+      status: 200,
+      json: { id: "abc123", path: "notes/hello.md", created: false },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "body", overwrite: true },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse((lastRequest()?.body as string | undefined) ?? "{}")).toMatchObject({
+      title: "Hello",
+      overwrite: true,
+    });
+  });
+
+  it("documents the conflict flow in the tool and field descriptions", async () => {
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch: vi.fn() });
+    const client = await createTestClient(server);
+
+    const result = await client.listTools();
+    const tool = result.tools.find((t) => t.name === "record_note");
+    expect(tool).toBeTruthy();
+
+    expect(tool?.description).toContain("topic_key");
+    expect(tool?.description).toContain("overwrite");
+
+    const props = (tool?.inputSchema.properties ?? {}) as Record<string, { description?: string }>;
+    expect(props.overwrite?.description).toBeTruthy();
+    expect(props.overwrite?.description).toContain("collision");
+    expect(props.topic_key?.description).toContain("in place");
+  });
+
   it("returns a validation error on Write API 400", async () => {
     const { fetch } = mockFetch({
       ok: false,
