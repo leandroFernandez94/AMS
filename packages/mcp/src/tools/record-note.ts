@@ -17,9 +17,20 @@ const inputSchema = {
     .string()
     .min(1)
     .optional()
-    .describe("Stable key for topic upserts (same key updates the same note)"),
+    .describe(
+      "Stable key for topic upserts: a note already carrying this key is updated " +
+        "in place, even when the title or type changes (the file moves to the new " +
+        "canonical path and the old file is removed — no orphans)",
+    ),
   tags: z.array(z.string().min(1)).optional().describe("Tags for categorization"),
   date: z.string().optional().describe("ISO date YYYY-MM-DD; defaults to today UTC"),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe(
+      "Force replacement on title collision: when a note already exists at the " +
+        "derived path, replace it instead of returning the conflict",
+    ),
 };
 
 /** Registers `record_note`, which persists a note via the Write API. */
@@ -29,7 +40,12 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
     {
       description:
         "Record a note in the AMS memory vault. Accepts any type " +
-        "(decision, learning, pattern, note, task, ...). The body is free-form markdown.",
+        "(decision, learning, pattern, note, task, ...). The body is free-form markdown. " +
+        "Routing: a payload with topic_key updates the note already carrying that key " +
+        "in place, even if the title changed (the file is renamed, no orphan left behind). " +
+        "Without topic_key, a title that resolves to an occupied path returns the " +
+        "existing note's full content as a conflict (not an error) — retitle the note " +
+        "or pass overwrite: true to replace the existing one.",
       inputSchema,
     },
     async (args): Promise<CallToolResult> => {
@@ -67,7 +83,8 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
         }
 
         const action = body.created === false ? "updated" : "recorded";
-        return toMcpText(`Note ${action}: ${body.id} at ${body.path}`);
+        const moved = typeof body.moved_from === "string" ? ` (moved from ${body.moved_from})` : "";
+        return toMcpText(`Note ${action}: ${body.id} at ${body.path}${moved}`);
       } catch (err) {
         return mapUnknownError(err);
       }
@@ -89,6 +106,7 @@ interface UpsertResult {
   id: string;
   path: string;
   created?: boolean;
+  moved_from?: string;
 }
 
 function isUpsertResult(value: unknown): value is UpsertResult {

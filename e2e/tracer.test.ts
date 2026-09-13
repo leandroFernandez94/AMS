@@ -44,9 +44,9 @@ describe("happy-path loop", () => {
     const result = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Bullet Verification",
+        title: "Tracer Bullet Persistence",
         type: "note",
-        body: "Tracer bullet end-to-end verification against a live QMD daemon.",
+        body: "Tracer bullet persistence verification against a live QMD daemon.",
       },
     });
 
@@ -59,17 +59,17 @@ describe("happy-path loop", () => {
     expect(existsSync(absPath)).toBe(true);
 
     const note = parseNote(await readFile(absPath, "utf8"));
-    expect(note.frontmatter.title).toBe("Tracer Bullet Verification");
-    expect(note.body).toContain("Tracer bullet end-to-end verification");
+    expect(note.frontmatter.title).toBe("Tracer Bullet Persistence");
+    expect(note.body).toContain("Tracer bullet persistence verification");
   });
 
   it("reindexes and finds the note via search_memory", async () => {
     const recordResult = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Bullet Verification",
+        title: "Tracer Bullet Retrieval",
         type: "note",
-        body: "Tracer bullet end-to-end verification against a live QMD daemon.",
+        body: "Tracer bullet retrieval verification against a live QMD daemon.",
       },
     });
     const relPath = (
@@ -82,12 +82,144 @@ describe("happy-path loop", () => {
 
     const searchResult = await fx.mcp.callTool({
       name: "search_memory",
-      arguments: { query: "tracer bullet verification" },
+      arguments: { query: "tracer bullet retrieval" },
     });
 
     expect(searchResult.isError).toBeFalsy();
     expect(searchResult.content[0]?.text).toContain(relPath);
     expect(searchResult.content[0]?.text).toContain("[#");
+  });
+});
+
+describe("conflict and resolution", () => {
+  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+
+  beforeAll(async () => {
+    fx = await createTracerFixture();
+  }, 60_000);
+
+  afterAll(async () => {
+    await fx.teardown();
+  }, 30_000);
+
+  it("surfaces a title collision as a protocol outcome with the old content", async () => {
+    const first = await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Collision Note",
+        type: "note",
+        body: "Original collision body.",
+      },
+    });
+    expect(first.isError).toBeFalsy();
+    const relPath = /at (?<path>\S+\.md)/.exec(first.content[0]?.text as string)?.groups
+      ?.path as string;
+
+    const second = await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Collision Note",
+        type: "note",
+        body: "Replacement body.",
+      },
+    });
+
+    // The conflict is a normal tool outcome the agent resolves, not an error.
+    expect(second.isError).toBeFalsy();
+    const text = second.content[0]?.text as string;
+    expect(text).toContain("already exists");
+    expect(text).toContain("Original collision body.");
+    expect(text).toContain("retitle your note");
+    expect(text).toContain("overwrite: true");
+
+    // Nothing was written: the note on disk keeps the original body.
+    const note = parseNote(await readFile(join(fx.vaultPath, relPath), "utf8"));
+    expect(note.body).toBe("Original collision body.");
+  });
+
+  it("resolves a collision via overwrite: true", async () => {
+    await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Resolution Note",
+        type: "note",
+        body: "First body.",
+      },
+    });
+
+    const result = await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Resolution Note",
+        type: "note",
+        body: "Second body.",
+        overwrite: true,
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toMatch(/Note updated: .+ at .+/);
+
+    const relPath = /at (?<path>\S+\.md)/.exec(result.content[0]?.text as string)?.groups
+      ?.path as string;
+    const note = parseNote(await readFile(join(fx.vaultPath, relPath), "utf8"));
+    expect(note.body).toBe("Second body.");
+  });
+
+  it("renames the note in place via topic_key and drops the stale index entry", async () => {
+    const first = await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Topic Flow",
+        type: "note",
+        body: "Topic flow original.",
+        topic_key: "tracer/topic-flow",
+      },
+    });
+    expect(first.isError).toBeFalsy();
+
+    const second = await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Topic Flow Renamed",
+        type: "note",
+        body: "Topic flow renamed.",
+        topic_key: "tracer/topic-flow",
+      },
+    });
+
+    expect(second.isError).toBeFalsy();
+    expect(second.content[0]?.text).toContain(
+      "Note updated: tracer-topic-flow-renamed at notes/tracer-topic-flow-renamed.md " +
+        "(moved from notes/tracer-topic-flow.md)",
+    );
+
+    // File moved: old path gone, new path present and carrying the key.
+    expect(existsSync(join(fx.vaultPath, "notes/tracer-topic-flow.md"))).toBe(false);
+    const note = parseNote(
+      await readFile(join(fx.vaultPath, "notes/tracer-topic-flow-renamed.md"), "utf8"),
+    );
+    expect(note.frontmatter.topic_key).toBe("tracer/topic-flow");
+    expect(note.body).toBe("Topic flow renamed.");
+
+    // After reindexing, search finds the renamed note and the stale entry
+    // for the deleted path is gone from the index.
+    const reindexResult = await fx.reindex();
+    expect(reindexResult.status).toBe("ok");
+
+    const searchResult = await fx.mcp.callTool({
+      name: "search_memory",
+      arguments: { query: "tracer topic flow renamed" },
+    });
+    expect(searchResult.isError).toBeFalsy();
+    expect(searchResult.content[0]?.text).toContain("notes/tracer-topic-flow-renamed.md");
+
+    const staleResult = await fx.mcp.callTool({
+      name: "search_memory",
+      arguments: { query: "topic flow original" },
+    });
+    expect(staleResult.isError).toBeFalsy();
+    expect(staleResult.content[0]?.text).not.toContain("notes/tracer-topic-flow.md");
   });
 });
 

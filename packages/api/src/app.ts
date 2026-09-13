@@ -16,14 +16,15 @@ import {
   isIsoDate,
   type Note,
   notePath,
+  parseNote,
 } from "@ams/shared";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import type { DirtyStore } from "./dirty.js";
 import type { IndexScheduler } from "./indexing/scheduler.js";
-import type { WriteLock } from "./lock.js";
+import type { ReleaseFunction, WriteLock } from "./lock.js";
 import type { Logger } from "./logger.js";
-import type { Vault } from "./vault.js";
+import type { TopicKeyMatch, Vault } from "./vault.js";
 
 /** Collaborators the HTTP layer needs. Injected for testability. */
 export interface AppDeps {
@@ -47,9 +48,19 @@ const NoteInputSchema = z.object({
   topic_key: z.string().min(1).optional(),
   tags: z.array(z.string().min(1)).optional(),
   date: z.string().optional(),
+  overwrite: z.boolean().optional(),
 });
 
 export type NoteInput = z.infer<typeof NoteInputSchema>;
+
+/**
+ * Upper bound on lock-set re-acquisitions per request. A topic_key write
+ * discovers the note's current path pre-lock; if the note moves between that
+ * lookup and lock acquisition, the decision cannot run safely and the whole
+ * sequence retries with fresh state. Sustained contention beyond this bound
+ * surfaces as a retryable 503 instead of corrupting the vault.
+ */
+const MAX_LOCK_ATTEMPTS = 3;
 
 /** Builds a fresh Hono app wired to the supplied dependencies. */
 export function createApp(deps: AppDeps): Hono {
@@ -141,13 +152,116 @@ async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new
     );
   }
 
-  const lockKey = notePath(note.frontmatter.id, note.frontmatter.type);
-  deps.logger.info("record_note:start", { id: note.frontmatter.id, path: lockKey });
+  const newRel = notePath(note.frontmatter.id, note.frontmatter.type);
+  const topicKey = note.frontmatter.topic_key;
+  const overwrite = parsed.data.overwrite ?? false;
 
-  // 5. Lock the canonical path, then upsert + flag. The TTL guarantees the
-  //    lock is freed even if this handler blows up between acquire and release.
-  const release = await deps.lock.acquire(lockKey);
+  deps.logger.info("record_note:start", { id: note.frontmatter.id, path: newRel });
+
+  // 5. Lock EVERY path this write can touch, then decide and write under the
+  //    lock. A topic_key update may rename the note, which touches two paths
+  //    (old + new); acquiring both in SORTED key order serializes crossing
+  //    renames and prevents deadlock. When old == new this degenerates to the
+  //    single lock of the original design.
+  for (let attempt = 1; attempt <= MAX_LOCK_ATTEMPTS; attempt++) {
+    // The old path can only be discovered by an unlocked scan; the decision
+    // itself is re-verified once the locks are held.
+    const pre = topicKey !== undefined ? await deps.vault.findByTopicKey(topicKey) : null;
+    const lockKeys = [...new Set([newRel, pre?.path ?? newRel])].sort();
+    const releases: ReleaseFunction[] = [];
+    try {
+      for (const key of lockKeys) {
+        releases.push(await deps.lock.acquire(key));
+      }
+      const existing = topicKey !== undefined ? await deps.vault.findByTopicKey(topicKey) : null;
+      if (existing !== null && !lockKeys.includes(existing.path)) {
+        // The note moved between the pre-lock lookup and acquisition, so the
+        // path we would delete is not lock-protected. Drop the locks and
+        // retry with fresh state.
+        continue;
+      }
+      return await persistNote(c, deps, { note, newRel, existing, overwrite });
+    } finally {
+      // Release is non-blocking; order is irrelevant, completeness is not.
+      for (const release of releases) {
+        release();
+      }
+    }
+  }
+  deps.logger.error("record_note:lock_contention", { id: note.frontmatter.id });
+  return c.json(
+    { error: "write_conflict", message: "Target note moved repeatedly; retry the request" },
+    503,
+  );
+}
+
+/** Inputs of the locked decision+write step. */
+interface PersistArgs {
+  note: Note;
+  /** Canonical (new) relative path derived from the payload. */
+  newRel: string;
+  /** Note currently owning the payload's topic_key, when routing applies. */
+  existing: TopicKeyMatch | null;
+  /** Whether the caller explicitly forces replacement on collision. */
+  overwrite: boolean;
+}
+
+/**
+ * Decision flow for POST /notes, executed UNDER the path lock(s).
+ *
+ *  - `topic_key` routing: when a note already owns the payload's key, this
+ *    request is an INTENDED UPDATE of that note — even if the new title or
+ *    type changes the canonical id/path. The rebuilt note is written at its
+ *    new path and the old file is then deleted (write-then-unlink). Only the
+ *    single writer holding both path locks runs here, so no reader can see a
+ *    half-move, and a crash between the two calls leaves at worst a
+ *    duplicate that the next topic_key write re-collapses. No orphan files.
+ *  - Otherwise this is a create. A create (keyed or not) landing on an
+ *    occupied canonical path is a conflict: 409 with the occupying note's
+ *    full raw content, nothing written — unless `overwrite: true` forces the
+ *    replacement.
+ */
+async function persistNote(c: Context, deps: AppDeps, args: PersistArgs) {
+  const { note, newRel, existing, overwrite } = args;
   try {
+    const destRaw = await deps.vault.readRaw(newRel);
+    const destNote = destRaw !== null ? safeParseNote(destRaw) : null;
+
+    if (existing !== null) {
+      // The destination only conflicts when a DIFFERENT note occupies it —
+      // the matched note itself (same path, or a duplicate carrying the same
+      // key) is exactly what we intend to update.
+      const destIsSameNote =
+        existing.path === newRel || destNote?.frontmatter.topic_key === note.frontmatter.topic_key;
+      if (destRaw !== null && !destIsSameNote && !overwrite) {
+        return noteExistsResponse(c, newRel, destRaw, destNote);
+      }
+      const renamed = existing.path !== newRel;
+      await deps.vault.upsertNote(note);
+      if (renamed) {
+        await deps.vault.deleteNote(existing.path);
+      }
+      await deps.dirty.mark(newRel);
+      if (renamed) {
+        // Mark the vanished path too. `qmd update` re-scans collections and
+        // drops documents whose files are missing from disk (verified against
+        // qmd 2.5.3), so the stale index entry is removed on the next tick.
+        await deps.dirty.mark(existing.path);
+      }
+      const payload = {
+        id: note.frontmatter.id,
+        path: newRel,
+        created: false,
+        ...(renamed ? { moved_from: existing.path } : {}),
+      };
+      deps.logger.info("record_note:done", payload);
+      return c.json(payload, 200);
+    }
+
+    // Create flow (with or without a topic_key nobody owns yet).
+    if (destRaw !== null && !overwrite) {
+      return noteExistsResponse(c, newRel, destRaw, destNote);
+    }
     const result = await deps.vault.upsertNote(note);
     await deps.dirty.mark(result.path);
     deps.logger.info("record_note:done", {
@@ -162,8 +276,26 @@ async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new
   } catch (e) {
     deps.logger.error("record_note:failed", { id: note.frontmatter.id, error: String(e) });
     return c.json({ error: "internal_error", message: "Failed to persist note" }, 500);
-  } finally {
-    release();
+  }
+}
+
+/**
+ * Builds the 409 conflict answer. `existing.body` is the FULL raw markdown
+ * source of the on-disk file — raw content, never re-serialized — so the
+ * caller sees exactly what it collides with.
+ */
+function noteExistsResponse(c: Context, relPath: string, raw: string, parsed: Note | null) {
+  const fallbackId = relPath.split("/").pop()?.replace(/\.md$/, "") ?? relPath;
+  const id = parsed?.frontmatter.id ?? fallbackId;
+  return c.json({ error: "note_exists", existing: { id, path: relPath, body: raw } }, 409);
+}
+
+/** Parses a note, returning null instead of throwing on invalid content. */
+function safeParseNote(source: string): Note | null {
+  try {
+    return parseNote(source);
+  } catch {
+    return null;
   }
 }
 
