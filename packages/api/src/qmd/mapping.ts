@@ -25,7 +25,7 @@
 export interface MemoryHit {
   /** QMD docid (`#abc123`) — the opaque handle to pass back to `getMemory`. */
   id: string;
-  /** Vault-relative path, e.g. `decisions/2026-07-01-x.md`. */
+  /** Vault-relative path, e.g. `decisions/use-qmd.md`. */
   path: string;
   /** Document title as QMD indexed it (empty when unknown). */
   title: string;

@@ -129,7 +129,7 @@ async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new
   }
 
   // 4. Full frontmatter validation (type/topic_key format) via the shared
-  //    contract, plus coherence (id === deriveId(title, date)).
+  //    contract, plus coherence (id === deriveId(title)).
   const fmCheck = FrontmatterSchema.safeParse(note.frontmatter);
   if (!fmCheck.success) {
     return c.json({ error: "validation_error", issues: formatIssues(fmCheck.error) }, 400);

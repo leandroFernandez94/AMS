@@ -104,8 +104,8 @@ describe("POST /notes — creation", () => {
 
     const body = await res.json();
     expect(body).toEqual({
-      id: "2026-07-01-use-qmd-for-retrieval",
-      path: "decisions/2026-07-01-use-qmd-for-retrieval.md",
+      id: "use-qmd-for-retrieval",
+      path: "decisions/use-qmd-for-retrieval.md",
       created: true,
     });
 
@@ -119,12 +119,25 @@ describe("POST /notes — creation", () => {
     expect(parsed.body).toContain("[[qmd]]");
   });
 
-  it("derives the id from title + date deterministically", async () => {
+  it("derives the id from the title deterministically", async () => {
     const app = createApp(makeDeps(new Vault(vaultDir)));
     const res = await post(app, basePayload);
     const { id, path } = await res.json();
-    expect(id).toBe("2026-07-01-use-qmd-for-retrieval");
+    expect(id).toBe("use-qmd-for-retrieval");
     expect(path).toBe(notePath(id, "decision"));
+  });
+
+  it("yields the same id for the same title on a different date", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    const first = await post(app, basePayload);
+    expect(first.status).toBe(201);
+
+    const second = await post(app, { ...basePayload, date: "2026-09-13", body: "Later take." });
+    expect(second.status).toBe(200);
+    const body = await second.json();
+    expect(body.created).toBe(false);
+    expect(body.id).toBe("use-qmd-for-retrieval");
   });
 
   it("works for any type (generic note contract)", async () => {
@@ -159,7 +172,7 @@ describe("POST /notes — idempotent upsert", () => {
     expect(second.status).toBe(200);
     const body = await second.json();
     expect(body.created).toBe(false);
-    expect(body.id).toBe("2026-07-01-use-qmd-for-retrieval");
+    expect(body.id).toBe("use-qmd-for-retrieval");
   });
 
   it("overwrites the existing file when the body changes", async () => {
@@ -169,7 +182,7 @@ describe("POST /notes — idempotent upsert", () => {
     const updated = await post(app, { ...basePayload, body: "Updated reasoning." });
     expect(updated.status).toBe(200);
 
-    const abs = join(vaultDir, "decisions/2026-07-01-use-qmd-for-retrieval.md");
+    const abs = join(vaultDir, "decisions/use-qmd-for-retrieval.md");
     const parsed = parseNote(await readFile(abs, "utf8"));
     expect(parsed.body).toBe("Updated reasoning.");
   });
@@ -177,7 +190,7 @@ describe("POST /notes — idempotent upsert", () => {
   it("is byte-stable for an identical repeated payload", async () => {
     const app = createApp(makeDeps(new Vault(vaultDir)));
     await post(app, basePayload);
-    const abs = join(vaultDir, "decisions/2026-07-01-use-qmd-for-retrieval.md");
+    const abs = join(vaultDir, "decisions/use-qmd-for-retrieval.md");
     const before = await readFile(abs, "utf8");
     await post(app, basePayload);
     const after = await readFile(abs, "utf8");
@@ -195,11 +208,11 @@ describe("POST /notes — dirty flag", () => {
     const app = createApp(deps);
 
     await post(app, basePayload);
-    expect(deps.dirty.has("decisions/2026-07-01-use-qmd-for-retrieval.md")).toBe(true);
+    expect(deps.dirty.has("decisions/use-qmd-for-retrieval.md")).toBe(true);
 
     // And the dirty.json file is materialized on disk.
     const raw = await readFile(join(vaultDir, ".ams", "dirty.json"), "utf8");
-    expect(JSON.parse(raw)).toHaveProperty("decisions/2026-07-01-use-qmd-for-retrieval.md");
+    expect(JSON.parse(raw)).toHaveProperty("decisions/use-qmd-for-retrieval.md");
   });
 });
 
@@ -285,7 +298,11 @@ describe("POST /notes — validation", () => {
 
     const res = await post(app, { title: "Undated note", type: "note", body: "b" });
     expect(res.status).toBe(201);
-    const { id } = await res.json();
-    expect(id.startsWith(`${today}-`)).toBe(true);
+    const { id, path } = await res.json();
+    expect(id).toBe("undated-note");
+
+    // The stamped date lands in the frontmatter — it never joins the id.
+    const parsed = parseNote(await readFile(join(vaultDir, path), "utf8"));
+    expect(parsed.frontmatter.date).toBe(today);
   });
 });

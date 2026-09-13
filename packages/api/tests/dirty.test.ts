@@ -17,8 +17,8 @@ afterEach(async () => {
 describe("DirtyStore", () => {
   it("marks a path and exposes it via has()", async () => {
     const store = new DirtyStore(join(dir, ".ams", "dirty.json"));
-    await store.mark("decisions/2026-07-01-x.md");
-    expect(store.has("decisions/2026-07-01-x.md")).toBe(true);
+    await store.mark("decisions/use-qmd.md");
+    expect(store.has("decisions/use-qmd.md")).toBe(true);
     expect(store.has("decisions/nope.md")).toBe(false);
   });
 

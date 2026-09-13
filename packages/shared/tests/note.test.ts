@@ -41,33 +41,26 @@ describe("slugify", () => {
 });
 
 describe("deriveId", () => {
-  it("joins date and slug deterministically", () => {
-    expect(deriveId("Use QMD for retrieval", "2026-07-01")).toBe(
-      "2026-07-01-use-qmd-for-retrieval",
-    );
+  it("derives the id from the title alone", () => {
+    expect(deriveId("Use QMD for retrieval")).toBe("use-qmd-for-retrieval");
   });
 
-  it("is deterministic for the same (title, date) pair", () => {
-    const a = deriveId("Same title", "2026-07-01");
-    const b = deriveId("Same title", "2026-07-01");
+  it("is deterministic for the same title", () => {
+    const a = deriveId("Same title");
+    const b = deriveId("Same title");
     expect(a).toBe(b);
   });
 
-  it("throws on non-ISO date", () => {
-    expect(() => deriveId("x", "2026/07/01")).toThrow(/Invalid ISO date/);
-    expect(() => deriveId("x", "2026-13-01")).not.toThrow(); // valid format, range out of scope
-  });
-
   it("throws when title yields an empty slug", () => {
-    expect(() => deriveId("🚀✨", "2026-07-01")).toThrow(/empty slug/);
+    expect(() => deriveId("🚀✨")).toThrow(/empty slug/);
   });
 });
 
 describe("notePath", () => {
   it("pluralizes the type directory via simple +s", () => {
-    expect(notePath("2026-07-01-use-qmd", "decision")).toBe("decisions/2026-07-01-use-qmd.md");
-    expect(notePath("2026-07-01-foo", "learning")).toBe("learnings/2026-07-01-foo.md");
-    expect(notePath("2026-07-01-foo", "note")).toBe("notes/2026-07-01-foo.md");
+    expect(notePath("use-qmd", "decision")).toBe("decisions/use-qmd.md");
+    expect(notePath("foo", "learning")).toBe("learnings/foo.md");
+    expect(notePath("foo", "note")).toBe("notes/foo.md");
   });
 });
 
@@ -76,7 +69,7 @@ describe("notePath", () => {
 // ---------------------------------------------------------------------------
 
 const CANONICAL = `---
-id: 2026-07-01-use-qmd-for-retrieval
+id: use-qmd-for-retrieval
 title: Use QMD for retrieval
 date: 2026-07-01
 type: decision
@@ -111,7 +104,7 @@ function buildSampleNote(): Note {
 describe("parseNote", () => {
   it("parses a well-formed note", () => {
     const note = parseNote(CANONICAL);
-    expect(note.frontmatter.id).toBe("2026-07-01-use-qmd-for-retrieval");
+    expect(note.frontmatter.id).toBe("use-qmd-for-retrieval");
     expect(note.frontmatter.title).toBe("Use QMD for retrieval");
     expect(note.frontmatter.type).toBe("decision");
     expect(note.frontmatter.topic_key).toBe("architecture/retrieval");
@@ -123,7 +116,7 @@ describe("parseNote", () => {
   it("does NOT enforce any specific H2 sections (body is free-form)", () => {
     // A body with no Context/Decision/Consequences must parse fine.
     const freeform = `---
-id: 2026-07-01-shower-thought
+id: shower-thought
 title: Shower thought
 date: 2026-07-01
 type: note
@@ -142,7 +135,7 @@ Just a random paragraph. No headers at all.
 
   it("rejects malformed YAML", () => {
     const bad = `---
-id: 2026-07-01-x
+id: x
 title: [unclosed
 type: note
 ---
@@ -152,20 +145,22 @@ body
   });
 
   it("rejects malformed frontmatter values via Zod", () => {
+    // `Not_An_Id` fails the slug regex (uppercase, underscores).
     const bad = `---
-id: not-an-id
-title: ""
+id: Not_An_Id
+title: X
 date: 2026-07-01
 type: note
 ---
 body
 `;
     expect(() => parseNote(bad)).toThrow(/Invalid frontmatter/);
+    expect(() => parseNote(bad)).toThrow(/id must be a slug derived from the title/);
   });
 
   it("rejects an invalid type", () => {
     const bad = `---
-id: 2026-07-01-x
+id: x
 title: X
 date: 2026-07-01
 type: "UPPER Case"
@@ -177,7 +172,7 @@ body
 
   it("defaults tags to empty array when omitted", () => {
     const noTags = `---
-id: 2026-07-01-x
+id: x
 title: X
 date: 2026-07-01
 type: note
@@ -189,7 +184,7 @@ body
 
   it("extracts wikilinks from the body during parse", () => {
     const note = parseNote(`---
-id: 2026-07-01-x
+id: x
 title: X
 date: 2026-07-01
 type: note
@@ -210,7 +205,7 @@ describe("verbatim body preservation", () => {
     const body =
       "## Arbitrary H2\n\n- list item\n- another\n\n```ts\nconst x = 1;\n```\n\n  indented text";
     const source = `---
-id: 2026-07-01-rich
+id: rich
 title: Rich
 date: 2026-07-01
 type: learning
@@ -224,7 +219,7 @@ ${body}
   it("preserves internal blank lines and indentation", () => {
     const body = "line one\n\n\n  indented\n\n    deeper";
     const source = `---
-id: 2026-07-01-ind
+id: ind
 title: Indented
 date: 2026-07-01
 type: note
@@ -237,7 +232,7 @@ ${body}
 
   it("normalizes CRLF to LF in the body", () => {
     const source =
-      "---\nid: 2026-07-01-x\ntitle: X\ndate: 2026-07-01\ntype: note\n---\r\n\r\nline a\r\nline b\r\n";
+      "---\nid: x\ntitle: X\ndate: 2026-07-01\ntype: note\n---\r\n\r\nline a\r\nline b\r\n";
     expect(parseNote(source).body).toBe("line a\nline b");
   });
 });
@@ -249,7 +244,7 @@ ${body}
 describe("serializeNote round-trip", () => {
   it("serializes a built note to canonical form", () => {
     const out = serializeNote(buildSampleNote());
-    expect(out).toContain("---\nid: 2026-07-01-use-qmd-for-retrieval");
+    expect(out).toContain("---\nid: use-qmd-for-retrieval");
     expect(out).toContain("type: decision");
     expect(out.endsWith("\n")).toBe(true);
     // Frontmatter block is separated from body by exactly one blank line.
@@ -299,7 +294,7 @@ describe("wikilinks", () => {
     // API to create files and that a broken link only ends up in the
     // validation list, with no side effect.
     const note = parseNote(`---
-id: 2026-07-01-x
+id: x
 title: X
 date: 2026-07-01
 type: note
@@ -309,7 +304,19 @@ Mentions [[totally-broken-link]].
 `);
     expect(note.wikilinks).toContain("totally-broken-link");
     // The parse result is a pure object; no creation side effect.
-    expect(note.frontmatter.id).toBe("2026-07-01-x");
+    expect(note.frontmatter.id).toBe("x");
+  });
+});
+
+describe("buildNote", () => {
+  it("yields the same id for the same title regardless of date", () => {
+    const a = buildNote({ title: "Stable id", date: "2026-01-01", type: "note", body: "a" });
+    const b = buildNote({ title: "Stable id", date: "2027-12-31", type: "note", body: "b" });
+    expect(a.frontmatter.id).toBe("stable-id");
+    expect(b.frontmatter.id).toBe(a.frontmatter.id);
+    // The dates still land in the frontmatter — only the id ignores them.
+    expect(a.frontmatter.date).toBe("2026-01-01");
+    expect(b.frontmatter.date).toBe("2027-12-31");
   });
 });
 
@@ -318,13 +325,19 @@ Mentions [[totally-broken-link]].
 // ---------------------------------------------------------------------------
 
 describe("isCoherent (upsert key contract)", () => {
-  it("returns true when id === deriveId(title, date)", () => {
+  it("returns true when id === deriveId(title)", () => {
     expect(isCoherent(buildSampleNote())).toBe(true);
   });
 
-  it("returns false when id does not match title/date", () => {
+  it("returns false when id does not match the title", () => {
     const note = buildSampleNote();
-    note.frontmatter.id = "2026-07-01-something-else";
+    note.frontmatter.id = "something-else";
+    expect(isCoherent(note)).toBe(false);
+  });
+
+  it("returns false for a legacy date-prefixed id", () => {
+    const note = buildSampleNote();
+    note.frontmatter.id = `2026-07-01-${note.frontmatter.id}`;
     expect(isCoherent(note)).toBe(false);
   });
 
@@ -342,7 +355,7 @@ describe("isCoherent (upsert key contract)", () => {
 describe("FrontmatterSchema", () => {
   it("accepts a valid record", () => {
     const r = FrontmatterSchema.parse({
-      id: "2026-07-01-x",
+      id: "x",
       title: "X",
       date: "2026-07-01",
       type: "note",
@@ -354,7 +367,7 @@ describe("FrontmatterSchema", () => {
   it("rejects empty tag strings", () => {
     expect(() =>
       FrontmatterSchema.parse({
-        id: "2026-07-01-x",
+        id: "x",
         title: "X",
         date: "2026-07-01",
         type: "note",
@@ -366,7 +379,7 @@ describe("FrontmatterSchema", () => {
   it("rejects malformed topic_key", () => {
     expect(() =>
       FrontmatterSchema.parse({
-        id: "2026-07-01-x",
+        id: "x",
         title: "X",
         date: "2026-07-01",
         type: "note",
