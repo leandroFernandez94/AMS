@@ -133,11 +133,14 @@ describe("POST /notes — creation", () => {
     const first = await post(app, basePayload);
     expect(first.status).toBe(201);
 
+    // Same title + different date derives the same canonical path, so without
+    // overwrite the second write is a conflict on that same path.
     const second = await post(app, { ...basePayload, date: "2026-09-13", body: "Later take." });
-    expect(second.status).toBe(200);
+    expect(second.status).toBe(409);
     const body = await second.json();
-    expect(body.created).toBe(false);
-    expect(body.id).toBe("use-qmd-for-retrieval");
+    expect(body.error).toBe("note_exists");
+    expect(body.existing.id).toBe("use-qmd-for-retrieval");
+    expect(body.existing.path).toBe("decisions/use-qmd-for-retrieval.md");
   });
 
   it("works for any type (generic note contract)", async () => {
@@ -157,11 +160,58 @@ describe("POST /notes — creation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Idempotent upsert
+// Title collision (no topic_key)
 // ---------------------------------------------------------------------------
 
-describe("POST /notes — idempotent upsert", () => {
-  it("returns 200 + created:false for the same logical id", async () => {
+describe("POST /notes — title collision", () => {
+  it("returns 409 note_exists with the existing note's full raw body and writes nothing", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    await post(app, basePayload);
+    const abs = join(vaultDir, "decisions/use-qmd-for-retrieval.md");
+    const before = await readFile(abs, "utf8");
+
+    const res = await post(app, { ...basePayload, body: "Clobber attempt." });
+    expect(res.status).toBe(409);
+
+    const body = await res.json();
+    expect(body.error).toBe("note_exists");
+    expect(body.existing.id).toBe("use-qmd-for-retrieval");
+    expect(body.existing.path).toBe("decisions/use-qmd-for-retrieval.md");
+    // FULL raw markdown source of the file on disk — frontmatter included,
+    // not a re-serialization.
+    expect(body.existing.body).toBe(before);
+    expect(body.existing.body).toContain("id: use-qmd-for-retrieval");
+    expect(body.existing.body).toContain("[[qmd]]");
+
+    // Nothing was written: the file is byte-identical.
+    expect(await readFile(abs, "utf8")).toBe(before);
+  });
+
+  it("completes the upsert when overwrite is true", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    await post(app, basePayload);
+    const res = await post(app, {
+      ...basePayload,
+      body: "Replacement reasoning.",
+      overwrite: true,
+    });
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body).toEqual({
+      id: "use-qmd-for-retrieval",
+      path: "decisions/use-qmd-for-retrieval.md",
+      created: false,
+    });
+
+    const abs = join(vaultDir, "decisions/use-qmd-for-retrieval.md");
+    const parsed = parseNote(await readFile(abs, "utf8"));
+    expect(parsed.body).toBe("Replacement reasoning.");
+  });
+
+  it("conflicts even for a byte-identical repeated payload (no silent overwrite)", async () => {
     const app = createApp(makeDeps(new Vault(vaultDir)));
 
     const first = await post(app, basePayload);
@@ -169,32 +219,218 @@ describe("POST /notes — idempotent upsert", () => {
     expect((await first.json()).created).toBe(true);
 
     const second = await post(app, basePayload);
-    expect(second.status).toBe(200);
-    const body = await second.json();
+    expect(second.status).toBe(409);
+
+    // The escape hatch restores the old upsert outcome.
+    const third = await post(app, { ...basePayload, overwrite: true });
+    expect(third.status).toBe(200);
+    const body = await third.json();
     expect(body.created).toBe(false);
     expect(body.id).toBe("use-qmd-for-retrieval");
   });
 
-  it("overwrites the existing file when the body changes", async () => {
-    const app = createApp(makeDeps(new Vault(vaultDir)));
-
-    await post(app, basePayload);
-    const updated = await post(app, { ...basePayload, body: "Updated reasoning." });
-    expect(updated.status).toBe(200);
-
-    const abs = join(vaultDir, "decisions/use-qmd-for-retrieval.md");
-    const parsed = parseNote(await readFile(abs, "utf8"));
-    expect(parsed.body).toBe("Updated reasoning.");
-  });
-
-  it("is byte-stable for an identical repeated payload", async () => {
+  it("is byte-stable when the same payload is rewritten via overwrite", async () => {
     const app = createApp(makeDeps(new Vault(vaultDir)));
     await post(app, basePayload);
     const abs = join(vaultDir, "decisions/use-qmd-for-retrieval.md");
     const before = await readFile(abs, "utf8");
-    await post(app, basePayload);
+    await post(app, { ...basePayload, overwrite: true });
     const after = await readFile(abs, "utf8");
     expect(after).toBe(before);
+  });
+
+  it("conflicts when a topic_key payload creates onto an occupied path", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    await post(app, basePayload);
+    // Nobody owns this key yet, so the payload is a create — but its title
+    // resolves to the occupied canonical path.
+    const res = await post(app, { ...basePayload, topic_key: "arch/retrieval" });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("note_exists");
+    expect(body.existing.id).toBe("use-qmd-for-retrieval");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// topic_key routing
+// ---------------------------------------------------------------------------
+
+describe("POST /notes — topic_key routing", () => {
+  it("creates normally (201) when no note carries the key", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    const res = await post(app, {
+      ...basePayload,
+      title: "Fresh topic",
+      topic_key: "arch/retrieval",
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.created).toBe(true);
+    expect(body.path).toBe("decisions/fresh-topic.md");
+    expect(body).not.toHaveProperty("moved_from");
+  });
+
+  it("updates the same note when the title changes — file moved, no orphan", async () => {
+    const deps = makeDeps(new Vault(vaultDir));
+    const app = createApp(deps);
+
+    const first = await post(app, {
+      ...basePayload,
+      title: "Use QMD for retrieval",
+      topic_key: "arch/retrieval",
+    });
+    expect(first.status).toBe(201);
+
+    const res = await post(app, {
+      ...basePayload,
+      title: "Retrieval stays local first",
+      body: "Renamed take with a new body.",
+      topic_key: "arch/retrieval",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: "retrieval-stays-local-first",
+      path: "decisions/retrieval-stays-local-first.md",
+      created: false,
+      moved_from: "decisions/use-qmd-for-retrieval.md",
+    });
+
+    // The old file is gone; the new file carries the payload.
+    expect(existsSync(join(vaultDir, "decisions/use-qmd-for-retrieval.md"))).toBe(false);
+    const abs = join(vaultDir, "decisions/retrieval-stays-local-first.md");
+    expect(existsSync(abs)).toBe(true);
+    const parsed = parseNote(await readFile(abs, "utf8"));
+    expect(parsed.frontmatter.title).toBe("Retrieval stays local first");
+    expect(parsed.frontmatter.topic_key).toBe("arch/retrieval");
+    expect(parsed.body).toBe("Renamed take with a new body.");
+
+    // Both sides of the move are flagged for reindexing.
+    expect(deps.dirty.has("decisions/retrieval-stays-local-first.md")).toBe(true);
+    expect(deps.dirty.has("decisions/use-qmd-for-retrieval.md")).toBe(true);
+  });
+
+  it("plain-updates in place when the id does not change (no moved_from)", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    await post(app, { ...basePayload, topic_key: "arch/retrieval" });
+    const res = await post(app, {
+      ...basePayload,
+      body: "Same title, refined body.",
+      topic_key: "arch/retrieval",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: "use-qmd-for-retrieval",
+      path: "decisions/use-qmd-for-retrieval.md",
+      created: false,
+    });
+
+    const parsed = parseNote(
+      await readFile(join(vaultDir, "decisions/use-qmd-for-retrieval.md"), "utf8"),
+    );
+    expect(parsed.body).toBe("Same title, refined body.");
+  });
+
+  it("moves the note across type directories when the type changes", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    await post(app, {
+      title: "Locking lesson",
+      type: "decision",
+      body: "Starts as a decision.",
+      date: "2026-07-01",
+      topic_key: "concurrency/locks",
+    });
+    const res = await post(app, {
+      title: "Locking lesson learned",
+      type: "learning",
+      body: "Reclassified as a learning.",
+      date: "2026-07-01",
+      topic_key: "concurrency/locks",
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe("learnings/locking-lesson-learned.md");
+    expect(body.moved_from).toBe("decisions/locking-lesson.md");
+
+    expect(existsSync(join(vaultDir, "decisions/locking-lesson.md"))).toBe(false);
+    expect(existsSync(join(vaultDir, "learnings/locking-lesson-learned.md"))).toBe(true);
+  });
+
+  it("returns 409 when the rename destination is occupied by a different note", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    // Occupant: a note with no topic_key at the path the rename targets.
+    const occupant = await post(app, {
+      ...basePayload,
+      title: "Occupied destination",
+      body: "Occupant body.",
+    });
+    expect(occupant.status).toBe(201);
+
+    // The routed note currently lives elsewhere.
+    await post(app, {
+      ...basePayload,
+      title: "Routed note",
+      body: "Original routed body.",
+      topic_key: "arch/retrieval",
+    });
+
+    // Rename the routed note onto the occupant's path.
+    const res = await post(app, {
+      ...basePayload,
+      title: "Occupied destination",
+      body: "Incoming body.",
+      topic_key: "arch/retrieval",
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("note_exists");
+    expect(body.existing.id).toBe("occupied-destination");
+    expect(body.existing.body).toContain("Occupant body.");
+
+    // Nothing moved: both files keep their content.
+    expect(
+      parseNote(await readFile(join(vaultDir, "decisions/occupied-destination.md"), "utf8")).body,
+    ).toBe("Occupant body.");
+    expect(parseNote(await readFile(join(vaultDir, "decisions/routed-note.md"), "utf8")).body).toBe(
+      "Original routed body.",
+    );
+  });
+
+  it("clobbers the destination on rename when overwrite is true", async () => {
+    const app = createApp(makeDeps(new Vault(vaultDir)));
+
+    await post(app, { ...basePayload, title: "Occupied destination", body: "Occupant body." });
+    await post(app, {
+      ...basePayload,
+      title: "Routed note",
+      body: "Original routed body.",
+      topic_key: "arch/retrieval",
+    });
+
+    const res = await post(app, {
+      ...basePayload,
+      title: "Occupied destination",
+      body: "Incoming body.",
+      topic_key: "arch/retrieval",
+      overwrite: true,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.created).toBe(false);
+    expect(body.moved_from).toBe("decisions/routed-note.md");
+
+    // The move completed: destination replaced, source removed.
+    const dest = parseNote(
+      await readFile(join(vaultDir, "decisions/occupied-destination.md"), "utf8"),
+    );
+    expect(dest.body).toBe("Incoming body.");
+    expect(dest.frontmatter.topic_key).toBe("arch/retrieval");
+    expect(existsSync(join(vaultDir, "decisions/routed-note.md"))).toBe(false);
   });
 });
 
@@ -227,10 +463,11 @@ describe("POST /notes — concurrency", () => {
 
     const [a, b] = await Promise.all([post(app, basePayload), post(app, basePayload)]);
 
-    // Exactly one created, one updated — they never overlapped.
+    // They never overlapped: one created the file, the loser found it
+    // already there and answered the conflict instead of clobbering it.
     expect(vault.maxInflight).toBe(1);
     const statuses = [a.status, b.status].sort();
-    expect(statuses).toEqual([200, 201]);
+    expect(statuses).toEqual([201, 409]);
   });
 
   it("lets independent ids proceed concurrently", async () => {

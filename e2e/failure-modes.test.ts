@@ -41,12 +41,14 @@ describe("lock contention", () => {
 
     const texts = [a.content[0]?.text as string, b.content[0]?.text as string];
     const recorded = texts.filter((t) => /Note recorded:/.test(t));
-    const updated = texts.filter((t) => /Note updated:/.test(t));
+    // The serialized loser sees the conflict as a protocol outcome, not an
+    // error, and never clobbers the winner's write.
+    const conflicted = texts.filter((t) => /already exists/.test(t));
 
     expect(a.isError).toBeFalsy();
     expect(b.isError).toBeFalsy();
     expect(recorded).toHaveLength(1);
-    expect(updated).toHaveLength(1);
+    expect(conflicted).toHaveLength(1);
 
     const files = await readdir(join(fx.vaultPath, "notes"));
     expect(files).toHaveLength(1);
