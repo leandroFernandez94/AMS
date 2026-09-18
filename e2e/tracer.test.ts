@@ -221,6 +221,51 @@ describe("conflict and resolution", () => {
     expect(staleResult.isError).toBeFalsy();
     expect(staleResult.content[0]?.text).not.toContain("notes/tracer-topic-flow.md");
   });
+
+  it("deletes a note via delete_note and drops the stale index entry", async () => {
+    const record = await fx.mcp.callTool({
+      name: "record_note",
+      arguments: {
+        title: "Tracer Delete Flow",
+        type: "note",
+        body: "Delete flow body.",
+      },
+    });
+    expect(record.isError).toBeFalsy();
+    const relPath = /at (?<path>\S+\.md)/.exec(record.content[0]?.text as string)?.groups
+      ?.path as string;
+
+    await fx.reindex();
+    const before = await fx.mcp.callTool({
+      name: "search_memory",
+      arguments: { query: "tracer delete flow" },
+    });
+    expect(before.isError).toBeFalsy();
+    expect(before.content[0]?.text).toContain(relPath);
+
+    const del = await fx.mcp.callTool({
+      name: "delete_note",
+      arguments: { file: relPath },
+    });
+    expect(del.isError).toBeFalsy();
+    expect(del.content[0]?.text).toBe(`Note deleted: ${relPath}`);
+    expect(existsSync(join(fx.vaultPath, relPath))).toBe(false);
+
+    // The delete fires a best-effort background tick, so the drain may land
+    // on that tick or on the explicit reindex — poll (bounded) until the
+    // index stops serving the deleted path.
+    let stale = true;
+    for (let attempt = 0; attempt < 10 && stale; attempt++) {
+      await fx.reindex();
+      const after = await fx.mcp.callTool({
+        name: "search_memory",
+        arguments: { query: "tracer delete flow" },
+      });
+      expect(after.isError).toBeFalsy();
+      stale = (after.content[0]?.text as string).includes(relPath);
+    }
+    expect(stale).toBe(false);
+  });
 });
 
 describe("lifecycle and readiness", () => {
