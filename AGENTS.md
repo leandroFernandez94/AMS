@@ -73,6 +73,17 @@ Always run `pnpm typecheck && pnpm test && pnpm check` before committing.
   markdown body. The parser does NOT enforce any H2 sections. Per-type
   structure (e.g. Context/Decision/Consequences for decisions) is a documented
   convention, not a parser constraint. Do not duplicate note state elsewhere.
+- **Three-axis note contract**: `type`, `topic_key` and `tags` answer
+  different questions about a note — do not conflate them.
+  - `type` = **WHERE** a note lives: filesystem placement (the folder is
+    derived from the type via `<type>s/`).
+  - `topic_key` = **WHO** a note is: identity/upsert routing (a payload with
+    a topic_key updates the note already carrying that key, in place).
+  - `tags` = **WHAT** a note is about: semantic relations between notes.
+    Tags are lowercase kebab-case (`^[a-z0-9][a-z0-9-]*$`). Discover the
+    existing vocabulary via `GET /tags` or the `list_tags` MCP tool and
+    prefer existing tags — minting near-synonyms (`finanzas` vs
+    `finanzas-personales`) fragments retrieval.
 
 ## Architecture constraints (from prior decisions)
 
