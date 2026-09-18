@@ -76,8 +76,6 @@ Always run `pnpm typecheck && pnpm test && pnpm check` before committing.
 
 ## Architecture constraints (from prior decisions)
 
-- **No auto-created stubs** for `[[broken wikilinks]]`. Links are validated
-  but never materialized into files by the system.
 - **Write locks with TTL** for the Write API (avoid deadlocks, see Spec 3).
 - **Do not duplicate note state** in a private SQLite if QMD can be queried.
 

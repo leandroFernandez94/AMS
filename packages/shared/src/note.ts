@@ -16,9 +16,6 @@
  *        === serializeNote(parseNote(x))
  *  - The body is preserved verbatim (no enforced H2 sections) so the
  *    round-trip is lossless for arbitrary markdown content.
- *  - Wikilinks `[[target]]` are extracted for validation, but the
- *    system policy is to NEVER materialize stubs for broken links
- *    (see the AMS architecture constraints).
  */
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
@@ -65,8 +62,6 @@ export interface Note {
   frontmatter: Frontmatter;
   /** Raw markdown body, preserved verbatim (only CRLF -> LF + edge trim). */
   body: string;
-  /** Wikilink targets found in the body. For validation only. */
-  wikilinks: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +101,6 @@ export function buildNote(input: {
   return {
     frontmatter,
     body: normalizeBody(input.body),
-    wikilinks: extractWikilinks(input.body),
   };
 }
 
@@ -127,18 +121,6 @@ function splitFrontmatter(source: string): SplitDoc {
     return { frontmatterRaw: null, body: trimmed };
   }
   return { frontmatterRaw: match[1], body: match[2] ?? "" };
-}
-
-const WIKILINK_RE = /\[\[([^[\]|]+)(?:\|[^[\]]+)?\]\]/g;
-
-/** Extracts unique targets from `[[target]]` or `[[target|alias]]` wikilinks. */
-export function extractWikilinks(text: string): string[] {
-  const seen = new Set<string>();
-  for (const m of text.matchAll(WIKILINK_RE)) {
-    const target = m[1]?.trim();
-    if (target && !seen.has(target)) seen.add(target);
-  }
-  return [...seen];
 }
 
 /** Normalizes body line endings (CRLF -> LF) and trims outer blank lines. */
@@ -178,7 +160,6 @@ export function parseNote(source: string): Note {
   return {
     frontmatter,
     body: normalizedBody,
-    wikilinks: extractWikilinks(normalizedBody),
   };
 }
 
