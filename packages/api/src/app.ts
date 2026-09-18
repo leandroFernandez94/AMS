@@ -15,8 +15,10 @@ import {
   isCoherent,
   isIsoDate,
   type Note,
+  newRequestId,
   notePath,
   parseNote,
+  REQUEST_ID_HEADER,
 } from "@ams/shared";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
@@ -25,6 +27,9 @@ import type { IndexScheduler } from "./indexing/scheduler.js";
 import type { ReleaseFunction, WriteLock } from "./lock.js";
 import type { Logger } from "./logger.js";
 import type { TopicKeyMatch, Vault } from "./vault.js";
+
+/** Hono environment: the per-request correlation id set by the middleware. */
+export type AppEnv = { Variables: { requestId: string } };
 
 /** Collaborators the HTTP layer needs. Injected for testability. */
 export interface AppDeps {
@@ -62,9 +67,48 @@ export type NoteInput = z.infer<typeof NoteInputSchema>;
  */
 const MAX_LOCK_ATTEMPTS = 3;
 
+/**
+ * Upper bound on an inbound `x-request-id`. Longer values are treated as
+ * hostile/malformed and replaced with a generated id.
+ */
+const MAX_REQUEST_ID_LENGTH = 128;
+
+/**
+ * Resolves the correlation id for a request: reuse a sane inbound
+ * `x-request-id`, otherwise generate one.
+ */
+function resolveRequestId(rawHeader: string | undefined): string {
+  const inbound = rawHeader?.trim();
+  if (inbound && inbound.length <= MAX_REQUEST_ID_LENGTH) {
+    return inbound;
+  }
+  return newRequestId();
+}
+
 /** Builds a fresh Hono app wired to the supplied dependencies. */
-export function createApp(deps: AppDeps): Hono {
-  const app = new Hono();
+export function createApp(deps: AppDeps): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+
+  // Correlation middleware — registered FIRST so every route (and its logs)
+  // runs with a requestId in scope. Also emits exactly one access-log line
+  // per request, after the handler finished, with ids/shapes only.
+  app.use("*", async (c, next) => {
+    const requestId = resolveRequestId(c.req.header(REQUEST_ID_HEADER));
+    c.set("requestId", requestId);
+    const startedAt = Date.now();
+    await next();
+    // Echo the id so callers that did not send one can learn it.
+    c.res.headers.set(REQUEST_ID_HEADER, requestId);
+    const status = c.res.status;
+    const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
+    deps.logger[level]("http:request:done", {
+      requestId,
+      method: c.req.method,
+      path: c.req.path,
+      status,
+      durationMs: Date.now() - startedAt,
+    });
+  });
 
   app.get("/health", (c) => c.json({ status: "ok" }));
 
@@ -101,7 +145,7 @@ function todayUtc(now: () => Date = () => new Date()): string {
   return now().toISOString().slice(0, 10);
 }
 
-async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new Date()) {
+async function recordNote(c: Context<AppEnv>, deps: AppDeps, now: () => Date = () => new Date()) {
   // 1. Parse and validate the JSON payload (shape only; format is enforced
   //    later by the shared frontmatter schema).
   let raw: unknown;
@@ -162,8 +206,9 @@ async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new
   const newRel = notePath(note.frontmatter.id, note.frontmatter.type);
   const topicKey = note.frontmatter.topic_key;
   const overwrite = parsed.data.overwrite ?? false;
+  const requestId = c.get("requestId");
 
-  deps.logger.info("record_note:start", { id: note.frontmatter.id, path: newRel });
+  deps.logger.info("record_note:start", { requestId, id: note.frontmatter.id, path: newRel });
 
   // 5. Lock EVERY path this write can touch, then decide and write under the
   //    lock. A topic_key update may rename the note, which touches two paths
@@ -187,7 +232,7 @@ async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new
         // retry with fresh state.
         continue;
       }
-      return await persistNote(c, deps, { note, newRel, existing, overwrite });
+      return await persistNote(c, deps, { note, newRel, existing, overwrite, requestId });
     } finally {
       // Release is non-blocking; order is irrelevant, completeness is not.
       for (const release of releases) {
@@ -195,7 +240,7 @@ async function recordNote(c: Context, deps: AppDeps, now: () => Date = () => new
       }
     }
   }
-  deps.logger.error("record_note:lock_contention", { id: note.frontmatter.id });
+  deps.logger.error("record_note:lock_contention", { requestId, id: note.frontmatter.id });
   return c.json(
     { error: "write_conflict", message: "Target note moved repeatedly; retry the request" },
     503,
@@ -211,6 +256,8 @@ interface PersistArgs {
   existing: TopicKeyMatch | null;
   /** Whether the caller explicitly forces replacement on collision. */
   overwrite: boolean;
+  /** Correlation id of the originating HTTP request. */
+  requestId: string;
 }
 
 /**
@@ -228,8 +275,8 @@ interface PersistArgs {
  *    full raw content, nothing written — unless `overwrite: true` forces the
  *    replacement.
  */
-async function persistNote(c: Context, deps: AppDeps, args: PersistArgs) {
-  const { note, newRel, existing, overwrite } = args;
+async function persistNote(c: Context<AppEnv>, deps: AppDeps, args: PersistArgs) {
+  const { note, newRel, existing, overwrite, requestId } = args;
   try {
     const destRaw = await deps.vault.readRaw(newRel);
     const destNote = destRaw !== null ? safeParseNote(destRaw) : null;
@@ -248,21 +295,22 @@ async function persistNote(c: Context, deps: AppDeps, args: PersistArgs) {
       if (renamed) {
         await deps.vault.deleteNote(existing.path);
       }
-      await deps.dirty.mark(newRel);
+      await deps.dirty.mark(newRel, requestId);
       if (renamed) {
         // Mark the vanished path too. `qmd update` re-scans collections and
         // drops documents whose files are missing from disk (verified against
         // qmd 2.5.3), so the stale index entry is removed on the next tick.
-        await deps.dirty.mark(existing.path);
+        await deps.dirty.mark(existing.path, requestId);
       }
-      const payload = {
+      const response = {
         id: note.frontmatter.id,
         path: newRel,
         created: false,
         ...(renamed ? { moved_from: existing.path } : {}),
       };
-      deps.logger.info("record_note:done", payload);
-      return c.json(payload, 200);
+      // Log fields carry ids/shapes only — the response body stays as-is.
+      deps.logger.info("record_note:done", { requestId, ...response });
+      return c.json(response, 200);
     }
 
     // Create flow (with or without a topic_key nobody owns yet).
@@ -270,8 +318,9 @@ async function persistNote(c: Context, deps: AppDeps, args: PersistArgs) {
       return noteExistsResponse(c, newRel, destRaw, destNote);
     }
     const result = await deps.vault.upsertNote(note);
-    await deps.dirty.mark(result.path);
+    await deps.dirty.mark(result.path, requestId);
     deps.logger.info("record_note:done", {
+      requestId,
       id: result.id,
       path: result.path,
       created: result.created,
@@ -281,7 +330,11 @@ async function persistNote(c: Context, deps: AppDeps, args: PersistArgs) {
       result.created ? 201 : 200,
     );
   } catch (e) {
-    deps.logger.error("record_note:failed", { id: note.frontmatter.id, error: String(e) });
+    deps.logger.error("record_note:failed", {
+      requestId,
+      id: note.frontmatter.id,
+      error: String(e),
+    });
     return c.json({ error: "internal_error", message: "Failed to persist note" }, 500);
   }
 }

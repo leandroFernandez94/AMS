@@ -1,5 +1,5 @@
-import type { JsonRpcRequest, JsonRpcResponse, JsonRpcTransport } from "@ams/api";
-import { QmdClient, QmdUnavailableError } from "@ams/api";
+import type { JsonRpcRequest, JsonRpcResponse, JsonRpcTransport, LogEntry } from "@ams/api";
+import { createLogger, QmdClient, QmdUnavailableError } from "@ams/api";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,13 +17,17 @@ async function createTestClient(server: ReturnType<typeof createServer>): Promis
 /** Builds a `fetch` mock that records the request and returns a configured response. */
 function mockFetch(response: { ok: boolean; status: number; json: unknown }): {
   fetch: typeof globalThis.fetch;
-  lastRequest: () => { url?: string; body?: unknown } | undefined;
+  lastRequest: () => { url?: string; body?: unknown; headers?: Record<string, string> } | undefined;
 } {
-  let last: { url?: string; body?: unknown } | undefined;
+  let last: { url?: string; body?: unknown; headers?: Record<string, string> } | undefined;
   const fetch = vi.fn(async (url, init) => {
     last = {
       url: typeof url === "string" ? url : undefined,
       body: init && typeof init === "object" && "body" in init ? init.body : undefined,
+      headers:
+        init && typeof init === "object" && "headers" in init
+          ? (init.headers as Record<string, string>)
+          : undefined,
     };
     return {
       ok: response.ok,
@@ -33,6 +37,16 @@ function mockFetch(response: { ok: boolean; status: number; json: unknown }): {
   });
   return { fetch: fetch as unknown as typeof globalThis.fetch, lastRequest: () => last };
 }
+
+/** Logger that buffers parsed entries so tests can assert on structured output. */
+function bufferLogger() {
+  const entries: LogEntry[] = [];
+  const logger = createLogger((line) => entries.push(JSON.parse(line)), "debug");
+  return Object.assign(logger, { entries });
+}
+
+/** Discards log lines — keeps the output of pre-existing tests clean. */
+const silentLogger = createLogger(() => undefined, "error");
 
 /** Creates a `QmdClient` driven by a fake JSON-RPC transport that records requests. */
 function fakeQmdClient(handler: (req: JsonRpcRequest) => JsonRpcResponse): {
@@ -109,7 +123,7 @@ describe("record_note", () => {
       status: 201,
       json: { id: "abc123", path: "notes/2026-07-27-hello.md", created: true },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -133,7 +147,7 @@ describe("record_note", () => {
       status: 200,
       json: { id: "abc123", path: "notes/2026-07-27-hello.md", created: false },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -155,7 +169,7 @@ describe("record_note", () => {
         moved_from: "notes/original.md",
       },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -187,7 +201,7 @@ describe("record_note", () => {
         },
       },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -208,7 +222,7 @@ describe("record_note", () => {
 
   it("keeps other 4xx/5xx statuses on the error path", async () => {
     const { fetch } = mockFetch({ ok: false, status: 409, json: { error: "something_else" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -226,7 +240,7 @@ describe("record_note", () => {
       status: 200,
       json: { id: "abc123", path: "notes/hello.md", created: false },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -242,7 +256,11 @@ describe("record_note", () => {
   });
 
   it("documents the conflict flow in the tool and field descriptions", async () => {
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch: vi.fn() });
+    const server = createServer({
+      apiUrl: "http://localhost:3000",
+      fetch: vi.fn(),
+      logger: silentLogger,
+    });
     const client = await createTestClient(server);
 
     const result = await client.listTools();
@@ -267,7 +285,7 @@ describe("record_note", () => {
         issues: [{ message: "title is required", path: ["title"] }],
       },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -282,7 +300,7 @@ describe("record_note", () => {
 
   it("returns an unavailable error on Write API 500", async () => {
     const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -298,7 +316,7 @@ describe("record_note", () => {
     const fetch = vi.fn(async () => {
       throw new Error("connection refused");
     }) as unknown as typeof globalThis.fetch;
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -312,7 +330,7 @@ describe("record_note", () => {
 
   it("returns an error when the Write API returns a malformed payload", async () => {
     const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -326,7 +344,7 @@ describe("record_note", () => {
 
   it("rejects a missing required field before calling upstream", async () => {
     const fetch = vi.fn(async () => new Response());
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -341,7 +359,7 @@ describe("record_note", () => {
 
   it("fails when AMS_API_URL is not configured", async () => {
     const { fetch } = mockFetch({ ok: true, status: 201, json: {} });
-    const server = createServer({ apiUrl: "", fetch });
+    const server = createServer({ apiUrl: "", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -365,7 +383,7 @@ describe("list_types", () => {
       status: 200,
       json: { types: ["decision", "learning", "pattern"] },
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -379,7 +397,11 @@ describe("list_types", () => {
   });
 
   it("instructs agents to prefer existing types in the description", async () => {
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch: vi.fn() });
+    const server = createServer({
+      apiUrl: "http://localhost:3000",
+      fetch: vi.fn(),
+      logger: silentLogger,
+    });
     const client = await createTestClient(server);
 
     const result = await client.listTools();
@@ -390,7 +412,7 @@ describe("list_types", () => {
 
   it("returns a non-error message for an empty type list", async () => {
     const { fetch } = mockFetch({ ok: true, status: 200, json: { types: [] } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -401,7 +423,7 @@ describe("list_types", () => {
 
   it("returns an unavailable error on Write API 500", async () => {
     const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -414,7 +436,7 @@ describe("list_types", () => {
     const fetch = vi.fn(async () => {
       throw new Error("connection refused");
     }) as unknown as typeof globalThis.fetch;
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -425,7 +447,7 @@ describe("list_types", () => {
 
   it("returns an error when the Write API returns a malformed payload", async () => {
     const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -436,7 +458,7 @@ describe("list_types", () => {
 
   it("fails when AMS_API_URL is not configured", async () => {
     const { fetch } = mockFetch({ ok: true, status: 200, json: { types: [] } });
-    const server = createServer({ apiUrl: "", fetch });
+    const server = createServer({ apiUrl: "", fetch, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -463,7 +485,7 @@ describe("search_memory", () => {
         },
       ]),
     );
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -481,7 +503,7 @@ describe("search_memory", () => {
 
   it("forwards rerank: true to QmdClient.searchMemory", async () => {
     const { client: qmdClient, lastRequest } = fakeQmdClient((req) => toolOk(req, []));
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     await client.callTool({
@@ -495,7 +517,7 @@ describe("search_memory", () => {
 
   it("returns a non-error message for empty results", async () => {
     const { client: qmdClient } = fakeQmdClient((req) => toolOk(req, []));
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -512,7 +534,7 @@ describe("search_memory", () => {
       throw new QmdUnavailableError("daemon down");
     };
     const qmdClient = new QmdClient({ transport });
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -538,7 +560,7 @@ describe("get_memory", () => {
         text: "<!-- Context: x -->\n\nbody content",
       }),
     );
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -556,7 +578,7 @@ describe("get_memory", () => {
 
   it("returns a structured not-found error when the document is absent", async () => {
     const { client: qmdClient } = fakeQmdClient((req) => toolOk(req, {}));
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -573,7 +595,7 @@ describe("get_memory", () => {
       throw new QmdUnavailableError("daemon down");
     };
     const qmdClient = new QmdClient({ transport });
-    const server = createServer({ qmdClient });
+    const server = createServer({ qmdClient, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -583,6 +605,106 @@ describe("get_memory", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("QMD retrieval unavailable");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Request-scoped logging
+// -----------------------------------------------------------------------------
+
+describe("request-scoped logging", () => {
+  it("record_note forwards the logged requestId as x-request-id and never logs argument values", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: true,
+      status: 201,
+      json: { id: "abc123", path: "notes/x.md", created: true },
+    });
+    const logger = bufferLogger();
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "SECRET BODY VALUE" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    const start = logger.entries.find((e) => e.msg === "tool:invoke:start");
+    const done = logger.entries.find((e) => e.msg === "tool:invoke:done");
+    expect(start?.tool).toBe("record_note");
+    expect(start?.requestId).toMatch(/^req_/);
+    expect((start?.argsKeys as string[]).slice().sort()).toEqual(["body", "title", "type"]);
+    expect(done?.requestId).toBe(start?.requestId);
+    expect(done?.ok).toBe(true);
+    expect(typeof done?.durationMs).toBe("number");
+
+    // The outgoing Write API call carries the same correlation id.
+    expect(lastRequest()?.headers?.["x-request-id"]).toBe(start?.requestId);
+
+    // Keys only — argument VALUES must never reach the logs.
+    const all = JSON.stringify(logger.entries);
+    expect(all).not.toContain("SECRET BODY VALUE");
+    expect(all).not.toContain("Hello");
+  });
+
+  it("list_types sends x-request-id matching its tool log line", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: true,
+      status: 200,
+      json: { types: ["decision"] },
+    });
+    const logger = bufferLogger();
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger });
+    const client = await createTestClient(server);
+
+    await client.callTool({ name: "list_types", arguments: {} });
+
+    const start = logger.entries.find((e) => e.msg === "tool:invoke:start");
+    expect(start?.tool).toBe("list_types");
+    expect(start?.requestId).toMatch(/^req_/);
+    expect(start?.argsKeys).toEqual([]);
+    expect(lastRequest()?.headers?.["x-request-id"]).toBe(start?.requestId);
+    expect(lastRequest()?.headers?.["content-type"]).toBeUndefined();
+  });
+
+  it("search_memory logs start/done with a fresh requestId per invocation", async () => {
+    const { client: qmdClient } = fakeQmdClient((req) => toolOk(req, []));
+    const logger = bufferLogger();
+    const server = createServer({ qmdClient, logger });
+    const client = await createTestClient(server);
+
+    await client.callTool({ name: "search_memory", arguments: { query: "auth" } });
+    await client.callTool({ name: "search_memory", arguments: { query: "auth" } });
+
+    const starts = logger.entries.filter((e) => e.msg === "tool:invoke:start");
+    const dones = logger.entries.filter((e) => e.msg === "tool:invoke:done");
+    expect(starts).toHaveLength(2);
+    expect(dones).toHaveLength(2);
+    for (const entry of [...starts, ...dones]) {
+      expect(entry.tool).toBe("search_memory");
+    }
+    expect(starts[0].requestId).not.toBe(starts[1].requestId);
+  });
+
+  it("logs tool:invoke:failed when the tool returns an error result", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("connection refused");
+    }) as unknown as typeof globalThis.fetch;
+    const logger = bufferLogger();
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "body" },
+    });
+
+    expect(result.isError).toBe(true);
+    const start = logger.entries.find((e) => e.msg === "tool:invoke:start");
+    const failed = logger.entries.find((e) => e.msg === "tool:invoke:failed");
+    expect(failed?.requestId).toBe(start?.requestId);
+    expect(failed?.ok).toBe(false);
+    expect(typeof failed?.durationMs).toBe("number");
   });
 });
 
@@ -614,6 +736,7 @@ describe("stdout cleanliness", () => {
       status: 201,
       json: { id: "x", path: "y.md", created: true },
     });
+    // No injected logger: this test proves the DEFAULT logger stays off stdout.
     const server = createServer({ apiUrl: "http://localhost:3000", fetch });
     const client = await createTestClient(server);
 

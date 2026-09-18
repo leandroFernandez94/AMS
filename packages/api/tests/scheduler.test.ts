@@ -149,6 +149,24 @@ describe("IndexScheduler.tick", () => {
     expect(msgs).toContain("indexer:tick:start");
     expect(msgs).toContain("indexer:tick:done");
   });
+
+  it("carries the distinct originating requestIds on tick log lines", async () => {
+    const dirty = new DirtyStore(join(dir, ".ams", "dirty.json"));
+    await dirty.mark("a.md", "req_z");
+    await dirty.mark("b.md", "req_a");
+    await dirty.mark("c.md", "req_a"); // duplicate id collapses
+    await dirty.mark("d.md"); // no id — omitted
+    const reindexer = new FakeReindexer();
+    const logger = bufferLogger();
+    const scheduler = makeScheduler(dirty, reindexer, logger);
+
+    await scheduler.tick();
+
+    const start = logger.entries.find((e) => e.msg === "indexer:tick:start");
+    const done = logger.entries.find((e) => e.msg === "indexer:tick:done");
+    expect(start?.requestIds).toEqual(["req_a", "req_z"]);
+    expect(done?.requestIds).toEqual(["req_a", "req_z"]);
+  });
 });
 
 describe("IndexScheduler lifecycle", () => {
