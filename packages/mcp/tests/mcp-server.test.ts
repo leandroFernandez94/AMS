@@ -17,12 +17,20 @@ async function createTestClient(server: ReturnType<typeof createServer>): Promis
 /** Builds a `fetch` mock that records the request and returns a configured response. */
 function mockFetch(response: { ok: boolean; status: number; json: unknown }): {
   fetch: typeof globalThis.fetch;
-  lastRequest: () => { url?: string; body?: unknown; headers?: Record<string, string> } | undefined;
+  lastRequest: () =>
+    | {
+        url?: string;
+        method?: string;
+        body?: unknown;
+        headers?: Record<string, string>;
+      }
+    | undefined;
 } {
-  let last: { url?: string; body?: unknown; headers?: Record<string, string> } | undefined;
+  let last: { url?: string; method?: string; body?: unknown; headers?: Record<string, string> };
   const fetch = vi.fn(async (url, init) => {
     last = {
       url: typeof url === "string" ? url : undefined,
+      method: init && typeof init === "object" && "method" in init ? init.method : undefined,
       body: init && typeof init === "object" && "body" in init ? init.body : undefined,
       headers:
         init && typeof init === "object" && "headers" in init
@@ -91,7 +99,7 @@ afterEach(() => {
 // -----------------------------------------------------------------------------
 
 describe("tool catalog", () => {
-  it("lists exactly five tools with descriptions and typed schemas", async () => {
+  it("lists exactly six tools with descriptions and typed schemas", async () => {
     const server = createServer();
     const client = await createTestClient(server);
 
@@ -99,6 +107,7 @@ describe("tool catalog", () => {
 
     const names = result.tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
+      "delete_note",
       "get_memory",
       "list_tags",
       "list_types",
@@ -111,7 +120,7 @@ describe("tool catalog", () => {
     }
     // Argument-bearing tools must describe their inputs; list_types and
     // list_tags legitimately take no arguments.
-    for (const name of ["get_memory", "record_note", "search_memory"]) {
+    for (const name of ["delete_note", "get_memory", "record_note", "search_memory"]) {
       const tool = result.tools.find((t) => t.name === name);
       expect(Object.keys(tool?.inputSchema.properties ?? {})).not.toHaveLength(0);
     }
@@ -409,6 +418,167 @@ describe("record_note", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// delete_note
+// -----------------------------------------------------------------------------
+
+describe("delete_note", () => {
+  it("sends DELETE with a per-segment encoded URL", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: true,
+      status: 200,
+      json: { deleted: true, path: "decisions/my note.md", note: null, raw: "x" },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/my note.md" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(lastRequest()?.method).toBe("DELETE");
+    // Slashes structure the path; only the special characters are escaped.
+    expect(lastRequest()?.url).toBe("http://localhost:3000/notes/decisions/my%20note.md");
+  });
+
+  it("renders the deleted path on success", async () => {
+    const { fetch } = mockFetch({
+      ok: true,
+      status: 200,
+      json: {
+        deleted: true,
+        path: "decisions/use-qmd.md",
+        note: { frontmatter: { id: "use-qmd" }, body: "b" },
+      },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/use-qmd.md" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toBe("Note deleted: decisions/use-qmd.md");
+  });
+
+  it("maps a 404 to a clear not-found error instead of the generic mapping", async () => {
+    const { fetch } = mockFetch({
+      ok: false,
+      status: 404,
+      json: { error: "not_found", message: "No note at decisions/missing.md" },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/missing.md" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Note not found: decisions/missing.md");
+  });
+
+  it("maps a 400 to a validation error via the shared Write API mapping", async () => {
+    const { fetch } = mockFetch({
+      ok: false,
+      status: 400,
+      json: {
+        error: "validation_error",
+        issues: [{ message: "path must end in .md", path: ["path"] }],
+      },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/foo.txt" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Validation error");
+    expect(result.content[0]?.text).toContain("path: path must end in .md");
+  });
+
+  it("returns an unavailable error on Write API 500", async () => {
+    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/x.md" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable: 500");
+  });
+
+  it("returns an unavailable error when fetch throws", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("connection refused");
+    }) as unknown as typeof globalThis.fetch;
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/x.md" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable");
+  });
+
+  it("returns an error when the Write API returns a malformed payload", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/x.md" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API returned an unexpected payload");
+  });
+
+  it("fails when AMS_API_URL is not configured", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: {} });
+    const server = createServer({ apiUrl: "", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "decisions/x.md" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
+  });
+
+  it("rejects an empty file argument before calling upstream", async () => {
+    const fetch = vi.fn(async () => new Response());
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "delete_note",
+      arguments: { file: "" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Input validation error");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
