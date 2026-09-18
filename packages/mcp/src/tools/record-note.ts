@@ -1,3 +1,5 @@
+import type { Logger } from "@ams/api";
+import { newRequestId, REQUEST_ID_HEADER } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -7,6 +9,7 @@ import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../err
 export interface RecordNoteDeps {
   apiUrl: string;
   fetch: typeof fetch;
+  logger: Logger;
 }
 
 const inputSchema = {
@@ -55,44 +58,71 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
       inputSchema,
     },
     async (args): Promise<CallToolResult> => {
-      const apiUrl = deps.apiUrl.trim();
-      if (!apiUrl) {
-        return {
-          content: [{ type: "text", text: "AMS_API_URL is not configured" }],
-          isError: true,
-        };
-      }
-
-      let response: Response;
-      try {
-        response = await deps.fetch(`${apiUrl}/notes`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(args),
-        });
-      } catch {
-        return toMcpError("Write API unavailable");
-      }
-
-      try {
-        if (!response.ok) {
-          const body = await parseJson(response);
-          return mapWriteApiError(response.status, body);
-        }
-
-        const body = await parseJson(response);
-        if (!isUpsertResult(body)) {
+      const tool = "record_note";
+      const requestId = newRequestId();
+      const startedAt = Date.now();
+      // Keys only — argument VALUES must never reach the logs.
+      deps.logger.info("tool:invoke:start", { tool, requestId, argsKeys: Object.keys(args) });
+      const run = async (): Promise<CallToolResult> => {
+        const apiUrl = deps.apiUrl.trim();
+        if (!apiUrl) {
           return {
-            content: [{ type: "text", text: "Write API returned an unexpected payload" }],
+            content: [{ type: "text", text: "AMS_API_URL is not configured" }],
             isError: true,
           };
         }
 
-        const action = body.created === false ? "updated" : "recorded";
-        const moved = typeof body.moved_from === "string" ? ` (moved from ${body.moved_from})` : "";
-        return toMcpText(`Note ${action}: ${body.id} at ${body.path}${moved}`);
-      } catch (err) {
-        return mapUnknownError(err);
+        let response: Response;
+        try {
+          response = await deps.fetch(`${apiUrl}/notes`, {
+            method: "POST",
+            headers: { "content-type": "application/json", [REQUEST_ID_HEADER]: requestId },
+            body: JSON.stringify(args),
+          });
+        } catch {
+          return toMcpError("Write API unavailable");
+        }
+
+        try {
+          if (!response.ok) {
+            const body = await parseJson(response);
+            return mapWriteApiError(response.status, body);
+          }
+
+          const body = await parseJson(response);
+          if (!isUpsertResult(body)) {
+            return {
+              content: [{ type: "text", text: "Write API returned an unexpected payload" }],
+              isError: true,
+            };
+          }
+
+          const action = body.created === false ? "updated" : "recorded";
+          const moved =
+            typeof body.moved_from === "string" ? ` (moved from ${body.moved_from})` : "";
+          return toMcpText(`Note ${action}: ${body.id} at ${body.path}${moved}`);
+        } catch (err) {
+          return mapUnknownError(err);
+        }
+      };
+      try {
+        const result = await run();
+        const durationMs = Date.now() - startedAt;
+        if (result.isError) {
+          deps.logger.error("tool:invoke:failed", { tool, requestId, ok: false, durationMs });
+        } else {
+          deps.logger.info("tool:invoke:done", { tool, requestId, ok: true, durationMs });
+        }
+        return result;
+      } catch (error) {
+        deps.logger.error("tool:invoke:failed", {
+          tool,
+          requestId,
+          ok: false,
+          durationMs: Date.now() - startedAt,
+          error: String(error),
+        });
+        throw error;
       }
     },
   );

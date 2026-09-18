@@ -1,4 +1,4 @@
-import type { QmdClient } from "@ams/api";
+import type { Logger, QmdClient } from "@ams/api";
 
 /** Injectable collaborators for `createServer`. All optional — production resolves from env. */
 export interface ServerDeps {
@@ -8,4 +8,9 @@ export interface ServerDeps {
   qmdClient?: QmdClient;
   /** Fetch implementation. Defaults to `globalThis.fetch`. */
   fetch?: typeof fetch;
+  /**
+   * Structured logger for tool invocation lines. Defaults to JSON lines on
+   * STDERR inside `createServer` — stdout is reserved for JSON-RPC frames.
+   */
+  logger?: Logger;
 }

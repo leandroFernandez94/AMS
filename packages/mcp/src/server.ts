@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "@ams/api";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getConfig } from "./config.js";
 import { registerGetMemory } from "./tools/get-memory.js";
@@ -22,14 +23,19 @@ const SERVER_INFO = {
 export function createServer(deps?: ServerDeps): McpServer {
   const server = new McpServer(SERVER_INFO);
   const config = getConfig();
+  // Built here, not at module scope, so merely importing the package writes
+  // nothing. The default sink is STDERR: stdout carries JSON-RPC frames only.
+  const logger: Logger = deps?.logger ?? createLogger((line) => process.stderr.write(`${line}\n`));
 
   registerRecordNote(server, {
     apiUrl: deps?.apiUrl ?? config.apiUrl,
     fetch: deps?.fetch ?? globalThis.fetch,
+    logger,
   });
   registerListTypes(server, {
     apiUrl: deps?.apiUrl ?? config.apiUrl,
     fetch: deps?.fetch ?? globalThis.fetch,
+    logger,
   });
   registerListTags(server, {
     apiUrl: deps?.apiUrl ?? config.apiUrl,
@@ -38,10 +44,12 @@ export function createServer(deps?: ServerDeps): McpServer {
   registerSearchMemory(server, {
     qmdClient: deps?.qmdClient,
     qmdUrl: config.qmdUrl,
+    logger,
   });
   registerGetMemory(server, {
     qmdClient: deps?.qmdClient,
     qmdUrl: config.qmdUrl,
+    logger,
   });
 
   return server;
