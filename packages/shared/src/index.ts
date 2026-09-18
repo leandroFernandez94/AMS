@@ -19,4 +19,4 @@ export {
   serializeNote,
 } from "./note.js";
 export { deriveId, isIsoDate, slugify } from "./slug.js";
-export { isNonEmpty, PACKAGE_NAME } from "./util.js";
+export { isNonEmpty, newRequestId, PACKAGE_NAME, REQUEST_ID_HEADER } from "./util.js";

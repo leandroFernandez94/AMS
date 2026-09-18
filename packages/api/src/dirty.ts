@@ -20,12 +20,14 @@ export interface DirtyEntry {
   path: string;
   /** Epoch millis when the path was marked dirty. */
   markedAt: number;
+  /** Correlation id of the request that marked the path, when known. */
+  requestId?: string;
 }
 
-export type DirtyMap = Record<string, { markedAt: number }>;
+export type DirtyMap = Record<string, { markedAt: number; requestId?: string }>;
 
 export class DirtyStore {
-  private readonly entries = new Map<string, number>();
+  private readonly entries = new Map<string, { markedAt: number; requestId?: string }>();
   private chain: Promise<unknown> = Promise.resolve();
 
   /**
@@ -34,10 +36,14 @@ export class DirtyStore {
    */
   constructor(private readonly filePath: string) {}
 
-  /** Marks `relPath` as dirty, persisting atomically. */
-  mark(relPath: string): Promise<void> {
+  /**
+   * Marks `relPath` as dirty, persisting atomically. `requestId` records which
+   * write caused the flag so indexer logs can point back at the originating
+   * request.
+   */
+  mark(relPath: string, requestId?: string): Promise<void> {
     this.chain = this.chain.then(async () => {
-      this.entries.set(relPath, Date.now());
+      this.entries.set(relPath, { markedAt: Date.now(), ...(requestId ? { requestId } : {}) });
       await this.persist();
     });
     return this.chain as Promise<void>;
@@ -45,7 +51,7 @@ export class DirtyStore {
 
   /** In-memory snapshot, primarily for tests and introspection. */
   snapshot(): DirtyEntry[] {
-    return [...this.entries.entries()].map(([path, markedAt]) => ({ path, markedAt }));
+    return [...this.entries.entries()].map(([path, entry]) => ({ path, ...entry }));
   }
 
   /** Whether a path is currently flagged as dirty. */
@@ -71,8 +77,8 @@ export class DirtyStore {
 
   private async persist(): Promise<void> {
     const map: DirtyMap = {};
-    for (const [path, markedAt] of this.entries) {
-      map[path] = { markedAt };
+    for (const [path, entry] of this.entries) {
+      map[path] = entry;
     }
     await mkdir(dirname(this.filePath), { recursive: true });
     const tmp = `${this.filePath}.tmp`;

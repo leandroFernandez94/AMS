@@ -1,4 +1,5 @@
-import { QmdClient, QmdError } from "@ams/api";
+import { type Logger, QmdClient, QmdError } from "@ams/api";
+import { newRequestId } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -8,6 +9,7 @@ import { mapQmdError, mapUnknownError, toMcpError, toMcpText } from "../errors.j
 export interface GetMemoryDeps {
   qmdClient?: QmdClient;
   qmdUrl: string;
+  logger: Logger;
 }
 
 const inputSchema = {
@@ -25,18 +27,44 @@ export function registerGetMemory(server: McpServer, deps: GetMemoryDeps): void 
       inputSchema,
     },
     async (args): Promise<CallToolResult> => {
-      try {
-        const client = resolveQmdClient(deps);
-        const doc = await client.getMemory({ file: args.file });
+      const tool = "get_memory";
+      const requestId = newRequestId();
+      const startedAt = Date.now();
+      // Keys only — argument VALUES must never reach the logs.
+      deps.logger.info("tool:invoke:start", { tool, requestId, argsKeys: Object.keys(args) });
+      const run = async (): Promise<CallToolResult> => {
+        try {
+          const client = resolveQmdClient(deps);
+          const doc = await client.getMemory({ file: args.file });
 
-        if (!doc) {
-          return toMcpError(`Not found: ${args.file}`);
+          if (!doc) {
+            return toMcpError(`Not found: ${args.file}`);
+          }
+
+          return toMcpText(doc.body);
+        } catch (err) {
+          if (err instanceof QmdError) return mapQmdError(err);
+          return mapUnknownError(err);
         }
-
-        return toMcpText(doc.body);
-      } catch (err) {
-        if (err instanceof QmdError) return mapQmdError(err);
-        return mapUnknownError(err);
+      };
+      try {
+        const result = await run();
+        const durationMs = Date.now() - startedAt;
+        if (result.isError) {
+          deps.logger.error("tool:invoke:failed", { tool, requestId, ok: false, durationMs });
+        } else {
+          deps.logger.info("tool:invoke:done", { tool, requestId, ok: true, durationMs });
+        }
+        return result;
+      } catch (error) {
+        deps.logger.error("tool:invoke:failed", {
+          tool,
+          requestId,
+          ok: false,
+          durationMs: Date.now() - startedAt,
+          error: String(error),
+        });
+        throw error;
       }
     },
   );

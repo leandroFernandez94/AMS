@@ -31,6 +31,19 @@ describe("DirtyStore", () => {
     const parsed = JSON.parse(raw);
     expect(parsed["learnings/a.md"]).toHaveProperty("markedAt");
     expect(typeof parsed["learnings/a.md"].markedAt).toBe("number");
+    // No requestId supplied — the key stays absent, not null/undefined.
+    expect(parsed["learnings/a.md"]).not.toHaveProperty("requestId");
+  });
+
+  it("persists the requestId alongside markedAt when supplied", async () => {
+    const file = join(dir, ".ams", "dirty.json");
+    const store = new DirtyStore(file);
+    await store.mark("learnings/a.md", "req_x");
+
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    expect(parsed["learnings/a.md"]).toEqual({ markedAt: expect.any(Number), requestId: "req_x" });
+    const entry = store.snapshot()[0];
+    expect(entry.requestId).toBe("req_x");
   });
 
   it("keeps all marks when several are written concurrently", async () => {
