@@ -51,4 +51,4 @@ export {
   QmdUnavailableError,
   type SearchMemoryInput,
 } from "./qmd/index.js";
-export { type TopicKeyMatch, type UpsertResult, Vault } from "./vault.js";
+export { type TagCount, type TopicKeyMatch, type UpsertResult, Vault } from "./vault.js";
