@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getConfig } from "./config.js";
 import { registerGetMemory } from "./tools/get-memory.js";
+import { registerListTags } from "./tools/list-tags.js";
 import { registerListTypes } from "./tools/list-types.js";
 import { registerRecordNote } from "./tools/record-note.js";
 import { registerSearchMemory } from "./tools/search-memory.js";
@@ -13,7 +14,7 @@ const SERVER_INFO = {
 };
 
 /**
- * Builds a configured `McpServer` with the four AMS domain tools registered.
+ * Builds a configured `McpServer` with the five AMS domain tools registered.
  *
  * Does NOT connect a transport — callers own transport wiring (stdio in
  * production, `InMemoryTransport` in tests).
@@ -27,6 +28,10 @@ export function createServer(deps?: ServerDeps): McpServer {
     fetch: deps?.fetch ?? globalThis.fetch,
   });
   registerListTypes(server, {
+    apiUrl: deps?.apiUrl ?? config.apiUrl,
+    fetch: deps?.fetch ?? globalThis.fetch,
+  });
+  registerListTags(server, {
     apiUrl: deps?.apiUrl ?? config.apiUrl,
     fetch: deps?.fetch ?? globalThis.fetch,
   });

@@ -49,13 +49,18 @@ const TYPE_RE = /^[a-z][a-z0-9-]*$/;
 /** Optional topic_key: lowercase path separated by `/`. */
 const TOPIC_KEY_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 
+/** Tag: lowercase kebab-case; a leading digit allows year-like tags (2026). */
+const TAG_RE = /^[a-z0-9][a-z0-9-]*$/;
+
 export const FrontmatterSchema = z.object({
   id: z.string().regex(ID_RE, "id must be a slug derived from the title"),
   title: z.string().min(1, "title must be non-empty"),
   date: z.string().refine(isIsoDate, "date must be YYYY-MM-DD"),
   type: z.string().regex(TYPE_RE, "type must be lowercase, starting with a letter"),
   topic_key: z.string().regex(TOPIC_KEY_RE, "topic_key must be a lowercase path").optional(),
-  tags: z.array(z.string().min(1)).default([]),
+  tags: z
+    .array(z.string().regex(TAG_RE, "tags must be lowercase kebab-case (letters, digits, hyphens)"))
+    .default([]),
 });
 
 export type Frontmatter = z.infer<typeof FrontmatterSchema>;

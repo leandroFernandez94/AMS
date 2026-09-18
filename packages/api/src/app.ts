@@ -75,6 +75,13 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ types });
   });
 
+  app.get("/tags", async (c) => {
+    // Live tolerant scan of the vault frontmatter via the vault — the
+    // authoritative tag vocabulary, independent of the QMD index.
+    const tags = await deps.vault.listTags();
+    return c.json({ tags });
+  });
+
   app.post("/notes", async (c) => recordNote(c, deps));
 
   app.post("/admin/reindex", async (c) => {

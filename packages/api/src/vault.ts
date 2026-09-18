@@ -34,6 +34,12 @@ export interface TopicKeyMatch {
   path: string;
 }
 
+/** A tag in the vault vocabulary, with how many notes carry it. */
+export interface TagCount {
+  name: string;
+  count: number;
+}
+
 export class Vault {
   constructor(private readonly root: string) {}
 
@@ -155,6 +161,40 @@ export class Vault {
       types.add(singularizeType(entry.name));
     }
     return [...types].sort();
+  }
+
+  /**
+   * Aggregates the tag vocabulary across all notes in the vault, with a
+   * per-tag note count, sorted by count (desc) then name (asc).
+   *
+   * Like `findByTopicKey`, this is a tolerant linear scan over every `*.md`
+   * file: files whose frontmatter does not conform to the note schema
+   * (hand-written notes) are skipped silently — a listing must never fail
+   * because of a stray file. Duplicate tags within one note count once (the
+   * number is "notes carrying the tag", not raw occurrences).
+   */
+  async listTags(): Promise<TagCount[]> {
+    const paths: string[] = [];
+    await this.collectMarkdownPaths(".", paths);
+    paths.sort();
+    const counts = new Map<string, number>();
+    for (const relPath of paths) {
+      const source = await this.readRaw(relPath);
+      if (source === null) continue;
+      let note: Note;
+      try {
+        note = parseNote(source);
+      } catch {
+        // Not an AMS note (or non-conforming frontmatter) — not ours to count.
+        continue;
+      }
+      for (const tag of new Set(note.frontmatter.tags)) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }
 
   /**
