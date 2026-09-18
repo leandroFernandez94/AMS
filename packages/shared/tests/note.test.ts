@@ -329,6 +329,46 @@ describe("FrontmatterSchema", () => {
     ).toThrow();
   });
 
+  it("accepts lowercase kebab-case tags including year-like leading digits", () => {
+    const r = FrontmatterSchema.parse({
+      id: "x",
+      title: "X",
+      date: "2026-07-01",
+      type: "note",
+      tags: ["finanzas-personales", "2026"],
+    });
+    expect(r.tags).toEqual(["finanzas-personales", "2026"]);
+  });
+
+  it("rejects non-kebab-case tags with a clear message", () => {
+    const bad = ["Salud", "has spaces", "", "-leading", "under_score"];
+    for (const tag of bad) {
+      expect(() =>
+        FrontmatterSchema.parse({
+          id: "x",
+          title: "X",
+          date: "2026-07-01",
+          type: "note",
+          tags: [tag],
+        }),
+      ).toThrow(/tags must be lowercase kebab-case/);
+    }
+  });
+
+  it("rejects a malformed tag during parseNote with the kebab-case message", () => {
+    const bad = `---
+id: x
+title: X
+date: 2026-07-01
+type: note
+tags:
+  - Salud
+---
+body
+`;
+    expect(() => parseNote(bad)).toThrow(/tags must be lowercase kebab-case/);
+  });
+
   it("rejects malformed topic_key", () => {
     expect(() =>
       FrontmatterSchema.parse({

@@ -77,20 +77,26 @@ afterEach(() => {
 // -----------------------------------------------------------------------------
 
 describe("tool catalog", () => {
-  it("lists exactly four tools with descriptions and typed schemas", async () => {
+  it("lists exactly five tools with descriptions and typed schemas", async () => {
     const server = createServer();
     const client = await createTestClient(server);
 
     const result = await client.listTools();
 
     const names = result.tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(["get_memory", "list_types", "record_note", "search_memory"]);
+    expect(names).toEqual([
+      "get_memory",
+      "list_tags",
+      "list_types",
+      "record_note",
+      "search_memory",
+    ]);
     for (const tool of result.tools) {
       expect(tool.description).toBeTruthy();
       expect(tool.inputSchema.type).toBe("object");
     }
-    // Argument-bearing tools must describe their inputs; list_types legitimately
-    // takes no arguments.
+    // Argument-bearing tools must describe their inputs; list_types and
+    // list_tags legitimately take no arguments.
     for (const name of ["get_memory", "record_note", "search_memory"]) {
       const tool = result.tools.find((t) => t.name === name);
       expect(Object.keys(tool?.inputSchema.properties ?? {})).not.toHaveLength(0);
@@ -280,6 +286,40 @@ describe("record_note", () => {
     expect(result.content[0]?.text).toContain("title: title is required");
   });
 
+  it("surfaces the kebab-case validation error for a malformed tag", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: false,
+      status: 400,
+      json: {
+        error: "validation_error",
+        issues: [
+          {
+            message: "tags must be lowercase kebab-case (letters, digits, hyphens)",
+            path: ["tags", "0"],
+          },
+        ],
+      },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({
+      name: "record_note",
+      arguments: { title: "Hello", type: "note", body: "body", tags: ["Salud"] },
+    });
+
+    // The malformed tag passes the tool's shape-only input schema and is
+    // rejected by the shared frontmatter schema in the Write API.
+    expect(JSON.parse((lastRequest()?.body as string | undefined) ?? "{}")).toMatchObject({
+      tags: ["Salud"],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Validation error");
+    expect(result.content[0]?.text).toContain(
+      "tags.0: tags must be lowercase kebab-case (letters, digits, hyphens)",
+    );
+  });
+
   it("returns an unavailable error on Write API 500", async () => {
     const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
     const server = createServer({ apiUrl: "http://localhost:3000", fetch });
@@ -440,6 +480,102 @@ describe("list_types", () => {
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// list_tags
+// -----------------------------------------------------------------------------
+
+describe("list_tags", () => {
+  it("calls GET /tags on the Write API and returns the vocabulary", async () => {
+    const { fetch, lastRequest } = mockFetch({
+      ok: true,
+      status: 200,
+      json: {
+        tags: [
+          { name: "finanzas", count: 3 },
+          { name: "2026", count: 1 },
+        ],
+      },
+    });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_tags", arguments: {} });
+
+    expect(lastRequest()?.url).toBe("http://localhost:3000/tags");
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0]?.text as string;
+    expect(text).toContain("finanzas (3)");
+    expect(text).toContain("2026 (1)");
+  });
+
+  it("instructs agents to prefer existing tags in the description", async () => {
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch: vi.fn() });
+    const client = await createTestClient(server);
+
+    const result = await client.listTools();
+    const tool = result.tools.find((t) => t.name === "list_tags");
+    expect(tool).toBeTruthy();
+    expect(tool?.description).toContain("prefer an existing tag");
+  });
+
+  it("returns a non-error message for an empty vocabulary", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { tags: [] } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_tags", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toBe("No tags exist in the vault yet");
+  });
+
+  it("returns an unavailable error on Write API 500", async () => {
+    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_tags", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable: 500");
+  });
+
+  it("returns an unavailable error when fetch throws", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("connection refused");
+    }) as unknown as typeof globalThis.fetch;
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_tags", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API unavailable");
+  });
+
+  it("returns an error when the Write API returns a malformed payload", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
+    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_tags", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Write API returned an unexpected payload");
+  });
+
+  it("fails when AMS_API_URL is not configured", async () => {
+    const { fetch } = mockFetch({ ok: true, status: 200, json: { tags: [] } });
+    const server = createServer({ apiUrl: "", fetch });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_tags", arguments: {} });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
