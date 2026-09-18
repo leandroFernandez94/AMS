@@ -1,3 +1,5 @@
+import type { Logger } from "@ams/api";
+import { newRequestId, REQUEST_ID_HEADER } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../errors.js";
@@ -6,6 +8,7 @@ import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../err
 export interface ListTypesDeps {
   apiUrl: string;
   fetch: typeof fetch;
+  logger: Logger;
 }
 
 /**
@@ -24,39 +27,66 @@ export function registerListTypes(server: McpServer, deps: ListTypesDeps): void 
         "existing ones fits.",
       inputSchema: {},
     },
-    async (): Promise<CallToolResult> => {
-      const apiUrl = deps.apiUrl.trim();
-      if (!apiUrl) {
-        return {
-          content: [{ type: "text", text: "AMS_API_URL is not configured" }],
-          isError: true,
-        };
-      }
-
-      let response: Response;
-      try {
-        response = await deps.fetch(`${apiUrl}/types`);
-      } catch {
-        return toMcpError("Write API unavailable");
-      }
-
-      try {
-        if (!response.ok) {
-          const body = await parseJson(response);
-          return mapWriteApiError(response.status, body);
-        }
-
-        const body = await parseJson(response);
-        if (!isTypesPayload(body)) {
+    async (args: Record<string, never>): Promise<CallToolResult> => {
+      const tool = "list_types";
+      const requestId = newRequestId();
+      const startedAt = Date.now();
+      deps.logger.info("tool:invoke:start", { tool, requestId, argsKeys: Object.keys(args ?? {}) });
+      const run = async (): Promise<CallToolResult> => {
+        const apiUrl = deps.apiUrl.trim();
+        if (!apiUrl) {
           return {
-            content: [{ type: "text", text: "Write API returned an unexpected payload" }],
+            content: [{ type: "text", text: "AMS_API_URL is not configured" }],
             isError: true,
           };
         }
 
-        return toMcpText(formatTypes(body.types));
-      } catch (err) {
-        return mapUnknownError(err);
+        let response: Response;
+        try {
+          response = await deps.fetch(`${apiUrl}/types`, {
+            headers: { [REQUEST_ID_HEADER]: requestId },
+          });
+        } catch {
+          return toMcpError("Write API unavailable");
+        }
+
+        try {
+          if (!response.ok) {
+            const body = await parseJson(response);
+            return mapWriteApiError(response.status, body);
+          }
+
+          const body = await parseJson(response);
+          if (!isTypesPayload(body)) {
+            return {
+              content: [{ type: "text", text: "Write API returned an unexpected payload" }],
+              isError: true,
+            };
+          }
+
+          return toMcpText(formatTypes(body.types));
+        } catch (err) {
+          return mapUnknownError(err);
+        }
+      };
+      try {
+        const result = await run();
+        const durationMs = Date.now() - startedAt;
+        if (result.isError) {
+          deps.logger.error("tool:invoke:failed", { tool, requestId, ok: false, durationMs });
+        } else {
+          deps.logger.info("tool:invoke:done", { tool, requestId, ok: true, durationMs });
+        }
+        return result;
+      } catch (error) {
+        deps.logger.error("tool:invoke:failed", {
+          tool,
+          requestId,
+          ok: false,
+          durationMs: Date.now() - startedAt,
+          error: String(error),
+        });
+        throw error;
       }
     },
   );

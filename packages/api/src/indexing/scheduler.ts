@@ -122,7 +122,12 @@ export class IndexScheduler {
     }
 
     const paths = entries.map((e) => e.path);
-    this.deps.logger.info("indexer:tick:start", { pending: entries.length });
+    // One tick drains a batch that may originate from several requests — the
+    // distinct originating ids travel with the tick for traceability.
+    const requestIds = [
+      ...new Set(entries.flatMap((e) => (e.requestId !== undefined ? [e.requestId] : []))),
+    ].sort();
+    this.deps.logger.info("indexer:tick:start", { pending: entries.length, requestIds });
 
     try {
       const result = await this.deps.reindexer.reindex(entries);
@@ -131,6 +136,7 @@ export class IndexScheduler {
       await this.deps.dirty.clear(paths);
       this.deps.logger.info("indexer:tick:done", {
         indexed: entries.length,
+        requestIds,
         updateSummary: result.updateSummary,
         embedSummary: result.embedSummary,
       });
