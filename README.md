@@ -37,7 +37,6 @@ Markdown Vault (source of truth)
 - **Markdown-first durability**: data remains usable without a proprietary backend.
 - **Read/Write separation**: retrieval and persistence are independent concerns.
 - **Semantic writes**: agents should call domain tools (e.g. record decision), not raw file writes.
-- **Obsidian-compatible linking**: preserve meaningful `[[wikilinks]]` and navigability.
 - **Conflict safety**: prefer append-only operations; use structured upserts for canonical notes.
 
 ## Retrieval
