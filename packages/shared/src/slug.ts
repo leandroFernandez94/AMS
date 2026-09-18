@@ -3,9 +3,9 @@
  *
  * The canonical id of a note is the slug derived from its title. The rule
  * is deterministic: the same title always yields the same id and therefore
- * the same vault path, enabling idempotent upserts without extra state
- * and unambiguous wikilink resolution. The creation date lives in
- * `frontmatter.date` only — it does not participate in the id.
+ * the same vault path, enabling idempotent upserts without extra state.
+ * The creation date lives in `frontmatter.date` only — it does not
+ * participate in the id.
  */
 
 /**
