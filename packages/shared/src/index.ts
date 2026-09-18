@@ -8,7 +8,6 @@
 
 export {
   buildNote,
-  extractWikilinks,
   type Frontmatter,
   FrontmatterSchema,
   isCoherent,

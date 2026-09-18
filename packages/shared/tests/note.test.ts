@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildNote,
   deriveId,
-  extractWikilinks,
   FrontmatterSchema,
   isCoherent,
   type Note,
@@ -181,19 +180,6 @@ body
 `;
     expect(parseNote(noTags).frontmatter.tags).toEqual([]);
   });
-
-  it("extracts wikilinks from the body during parse", () => {
-    const note = parseNote(`---
-id: x
-title: X
-date: 2026-07-01
-type: note
----
-
-Refs [[ADR-001]] and [[broken-link]] and again [[ADR-001]].
-`);
-    expect(note.wikilinks).toEqual(["ADR-001", "broken-link"]);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,39 +258,6 @@ describe("serializeNote round-trip", () => {
     });
     const serialized = serializeNote(note);
     expect(parseNote(serialized).body).toBe(body);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Wikilinks — policy: extract, never materialize
-// ---------------------------------------------------------------------------
-
-describe("wikilinks", () => {
-  it("extracts [[target]] and [[target|alias]] targets", () => {
-    const links = extractWikilinks(
-      "see [[ADR-001]] and [[ADR-002|the second]] and again [[ADR-001]]",
-    );
-    expect(links).toEqual(["ADR-001", "ADR-002"]);
-  });
-
-  it("does NOT materialize files for broken links (policy)", () => {
-    // Contract: parseNote only RETURNS the list of targets. Creating files
-    // is the upper layer's responsibility, and the AMS policy forbids
-    // creating stubs for broken links. We verify that parseNote offers no
-    // API to create files and that a broken link only ends up in the
-    // validation list, with no side effect.
-    const note = parseNote(`---
-id: x
-title: X
-date: 2026-07-01
-type: note
----
-
-Mentions [[totally-broken-link]].
-`);
-    expect(note.wikilinks).toContain("totally-broken-link");
-    // The parse result is a pure object; no creation side effect.
-    expect(note.frontmatter.id).toBe("x");
   });
 });
 
