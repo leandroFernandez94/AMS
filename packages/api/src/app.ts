@@ -1,9 +1,10 @@
 /**
  * HTTP application for the Write API.
  *
- * The single semantic operation for the tracer bullet is `record_note`,
- * exposed as `POST /notes`. Agents never touch the filesystem directly —
- * every mutation is validated, lock-protected and flagged for the indexer.
+ * The semantic operations for the tracer bullet are `record_note`
+ * (`POST /notes`) and note deletion (`DELETE /notes/:path`). Agents never
+ * touch the filesystem directly — every mutation is validated, lock-protected
+ * and flagged for the indexer.
  *
  * Dependencies are injected via `createApp` so tests can wire a temp vault,
  * a fake lock or a spy logger without spinning up a real server or touching
@@ -127,6 +128,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
 
   app.post("/notes", async (c) => recordNote(c, deps));
+  // Regex param so slashes inside the vault-relative path survive routing.
+  app.delete("/notes/:path{.+}", async (c) => deleteNoteAt(c, deps));
 
   app.post("/admin/reindex", async (c) => {
     // Forces one indexing cycle now, regardless of the cron schedule. Used for
@@ -254,6 +257,76 @@ async function recordNote(c: Context<AppEnv>, deps: AppDeps, now: () => Date = (
   );
 }
 
+/**
+ * DELETE /notes/:path — removes the note file at a vault-relative path and
+ * flags the vanished path for reindexing (same rationale as the rename flow:
+ * `qmd update` drops docs whose files are missing, verified against qmd 2.5.3).
+ *
+ * A single bounded lock attempt is correct here — unlike recordNote there is
+ * no unlocked discovery step whose result could go stale, so no move-retry
+ * loop is possible: the target path comes straight from the URL and the
+ * check+unlink pair runs atomically under the lock.
+ */
+async function deleteNoteAt(c: Context<AppEnv>, deps: AppDeps) {
+  // Undefined is impossible with the `.+` route pattern; coalescing routes
+  // any hypothetical miss into the empty-path validation branch.
+  const relPath = c.req.param("path") ?? "";
+  const issues = notePathIssues(relPath);
+  if (issues.length > 0) {
+    return c.json({ error: "validation_error", issues }, 400);
+  }
+
+  const requestId = c.get("requestId");
+  deps.logger.info("delete_note:start", { requestId, path: relPath });
+
+  // Fast-fail before queueing on the lock: the common mistake (wrong path)
+  // must not wait behind a concurrent writer.
+  if ((await deps.vault.readRaw(relPath)) === null) {
+    return c.json({ error: "not_found", message: `No note at ${relPath}` }, 404);
+  }
+
+  let release: ReleaseFunction;
+  try {
+    release = await deps.lock.acquire(relPath);
+  } catch {
+    deps.logger.error("delete_note:lock_contention", { requestId, path: relPath });
+    return c.json(
+      { error: "write_conflict", message: "Note is locked by another writer; retry the request" },
+      503,
+    );
+  }
+
+  try {
+    // Re-check under the lock: the file may have vanished while we waited.
+    const raw = await deps.vault.readRaw(relPath);
+    if (raw === null) {
+      return c.json({ error: "not_found", message: `No note at ${relPath}` }, 404);
+    }
+    // Unparseable files (hand-written notes) are deleted too; their raw
+    // content travels back so an accidental delete stays recoverable.
+    const note = safeParseNote(raw);
+    if (!(await deps.vault.deleteNote(relPath))) {
+      deps.logger.error("delete_note:failed", { requestId, path: relPath });
+      return c.json({ error: "internal_error", message: "Failed to delete note" }, 500);
+    }
+    await deps.dirty.mark(relPath, requestId);
+
+    deps.logger.info("delete_note:done", { requestId, path: relPath });
+    // Best-effort immediate reindex — the periodic tick remains the real
+    // guarantee, so a failed tick must not fail the already-durable delete.
+    if (deps.scheduler) {
+      void deps.scheduler.tick().catch(() => {});
+    }
+    return c.json({
+      deleted: true,
+      path: relPath,
+      ...(note !== null ? { note } : { note: null, raw }),
+    });
+  } finally {
+    release();
+  }
+}
+
 /** Inputs of the locked decision+write step. */
 interface PersistArgs {
   note: Note;
@@ -376,4 +449,40 @@ function formatIssues(error: z.ZodError): ValidationIssue[] {
     field: issue.path.join(".") || "(root)",
     message: issue.message,
   }));
+}
+
+/**
+ * Structural validation for a vault-relative note path (DELETE /notes/:path).
+ *
+ * Deliberately NOT a strict `<type>s/<id>.md` pattern: the vault tolerates
+ * nested and hand-written files, so only shapes that could escape the vault
+ * or touch system state are rejected. Note that a standards-compliant URL
+ * parser resolves `..` (and `%2e`-encoded) dot-segments before routing, so
+ * that rule is defense-in-depth for non-HTTP callers, not a live route case.
+ */
+function notePathIssues(relPath: string): ValidationIssue[] {
+  if (relPath.length === 0) {
+    return [{ field: "path", message: "path must not be empty" }];
+  }
+  const issues: ValidationIssue[] = [];
+  if (relPath.includes("\\")) {
+    issues.push({ field: "path", message: "path must use / as separator" });
+  }
+  if (relPath.startsWith("/")) {
+    issues.push({ field: "path", message: "path must be vault-relative, not absolute" });
+  }
+  if (!relPath.endsWith(".md")) {
+    issues.push({ field: "path", message: "path must end in .md" });
+  }
+  for (const segment of relPath.split("/")) {
+    if (segment === "") {
+      issues.push({ field: "path", message: "path must not contain empty segments" });
+    } else if (segment === "..") {
+      issues.push({ field: "path", message: "path must not contain .. segments" });
+    } else if (segment.startsWith(".")) {
+      // Blocks `.ams/`, `.qmd/` — system state, never note content.
+      issues.push({ field: "path", message: "path must not enter dot-directories" });
+    }
+  }
+  return issues;
 }
