@@ -6,5 +6,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "references": [{ "path": "../api" }, { "path": "../shared" }]
+  "references": [{ "path": "../shared" }]
 }

@@ -23,7 +23,7 @@
  * `structuredContent.results`; `get` answers with a `resource` content item
  * whose `text` is the body and whose `uri` is the document path.
  */
-import { isNonEmpty } from "@ams/shared";
+import { isNonEmpty } from "../util.js";
 import { DEFAULT_QMD_URL, loadQmdConfig } from "./config.js";
 import { QmdError, QmdToolError, QmdUnavailableError } from "./errors.js";
 import {

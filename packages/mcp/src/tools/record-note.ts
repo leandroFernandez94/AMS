@@ -1,14 +1,12 @@
-import type { Logger } from "@ams/api";
-import { newRequestId, REQUEST_ID_HEADER } from "@ams/shared";
+import { type Logger, newRequestId, type UpsertResponse, WriteApiError } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../errors.js";
+import { mapUnknownError, mapWriteApiClientError, toMcpText } from "../errors.js";
+import { resolveWriteApiClient, type WriteApiDeps } from "../write-api.js";
 
 /** Collaborators needed by the `record_note` tool. */
-export interface RecordNoteDeps {
-  apiUrl: string;
-  fetch: typeof fetch;
+export interface RecordNoteDeps extends WriteApiDeps {
   logger: Logger;
 }
 
@@ -70,44 +68,12 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
       // Keys only — argument VALUES must never reach the logs.
       deps.logger.info("tool:invoke:start", { tool, requestId, argsKeys: Object.keys(args) });
       const run = async (): Promise<CallToolResult> => {
-        const apiUrl = deps.apiUrl.trim();
-        if (!apiUrl) {
-          return {
-            content: [{ type: "text", text: "AMS_API_URL is not configured" }],
-            isError: true,
-          };
-        }
-
-        let response: Response;
         try {
-          response = await deps.fetch(`${apiUrl}/notes`, {
-            method: "POST",
-            headers: { "content-type": "application/json", [REQUEST_ID_HEADER]: requestId },
-            body: JSON.stringify(args),
-          });
-        } catch {
-          return toMcpError("Write API unavailable");
-        }
-
-        try {
-          if (!response.ok) {
-            const body = await parseJson(response);
-            return mapWriteApiError(response.status, body);
-          }
-
-          const body = await parseJson(response);
-          if (!isUpsertResult(body)) {
-            return {
-              content: [{ type: "text", text: "Write API returned an unexpected payload" }],
-              isError: true,
-            };
-          }
-
-          const action = body.created === false ? "updated" : "recorded";
-          const moved =
-            typeof body.moved_from === "string" ? ` (moved from ${body.moved_from})` : "";
-          return toMcpText(`Note ${action}: ${body.id} at ${body.path}${moved}`);
+          const client = resolveWriteApiClient(deps);
+          const result = await client.recordNote(args, { requestId });
+          return toMcpText(formatUpsert(result));
         } catch (err) {
+          if (err instanceof WriteApiError) return mapWriteApiClientError(err);
           return mapUnknownError(err);
         }
       };
@@ -134,28 +100,9 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
   );
 }
 
-/** Parses the response body as JSON when possible, falling back to an empty object. */
-async function parseJson(response: Response): Promise<Record<string, unknown>> {
-  try {
-    return (await response.json()) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-/** Write API upsert response shape. */
-interface UpsertResult {
-  id: string;
-  path: string;
-  created?: boolean;
-  moved_from?: string;
-}
-
-function isUpsertResult(value: unknown): value is UpsertResult {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as Record<string, unknown>).id === "string" &&
-    typeof (value as Record<string, unknown>).path === "string"
-  );
+/** Renders the upsert outcome line, including the rename suffix when moved. */
+function formatUpsert(result: UpsertResponse): string {
+  const action = result.created === false ? "updated" : "recorded";
+  const moved = typeof result.moved_from === "string" ? ` (moved from ${result.moved_from})` : "";
+  return `Note ${action}: ${result.id} at ${result.path}${moved}`;
 }
