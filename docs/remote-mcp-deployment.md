@@ -268,18 +268,27 @@ in exchange for centralized deploys and client portability.
 
 ### Phased plan
 
+**The MCP service does not need new hardware — it deploys on the existing
+self-hosted server** (one more service in the compose stack, image from
+ghcr.io). This is strictly better than a separate MCP host: MCP → upstream
+calls become localhost/container-network round-trips (the tailnet-link
+failure mode between MCP and upstreams disappears), and there is one box to
+operate. The original "separate host" framing in #27 is satisfied by a
+separate *service*, not a separate machine.
+
 - **Phase 1 — tailnet service (#37)**: MCP as a long-lived HTTP service on
-  the tailnet. Stateless Streamable HTTP behind a static bearer token
-  (`requireBearerAuth`). Own agents (OpenCode on any tailnet host) switch
-  from local stdio to the remote URL. Deployment becomes one image update;
-  no public exposure.
-- **Phase 2 — public reachability for external apps (follow-up issue)**:
-  Claude app / ChatGPT clients run on vendor clouds and cannot reach a
-  tailnet-only service. Exposing the MCP publicly requires HTTPS via the
-  existing cloudflared tunnel *and* a real auth upgrade (OAuth 2.1 resource
-  server, or tunnel-fronted Cloudflare Access) — a static token alone is not
-  an acceptable boundary between the public internet and write access to
-  the vault.
+  the existing server, reachable at its tailnet address. Stateless Streamable
+  HTTP behind a static bearer token (`requireBearerAuth`), upstreams at
+  localhost. Own agents (OpenCode on any tailnet host) switch from local
+  stdio to the remote URL. Deployment becomes one image update; no public
+  exposure.
+- **Phase 2 — public reachability for external apps (#39)**: Claude app /
+  ChatGPT clients run on vendor clouds and cannot reach a tailnet-only
+  service. The existing cloudflared tunnel on the same server fronts the MCP
+  with public HTTPS (origin at localhost) AND a real auth upgrade (OAuth 2.1
+  resource server, or tunnel-fronted Cloudflare Access) — a static token
+  alone is not an acceptable boundary between the public internet and write
+  access to the vault.
 
 Topology 2 remains the running baseline until phase 1 ships. Topology 3
 stays rejected (one server, one user — nothing to fan out).
@@ -290,7 +299,7 @@ stays rejected (one server, one user — nothing to fan out).
 | ------------ | ------------------------------------------------------- |
 | Transport    | Stateless Streamable HTTP (target); stdio stays as migration fallback |
 | Auth         | Phase 1: static bearer token, tailnet-only. Phase 2: OAuth 2.1 / tunnel-fronted access for public |
-| Network      | MCP on the tailnet (phase 1); public HTTPS via cloudflared for external apps (phase 2). Vault/API/QMD never move |
+| Network      | MCP runs on the existing self-hosted server: own agents reach it via tailnet (phase 1), external apps via cloudflared public HTTPS (phase 2). Upstreams stay localhost. Vault/API/QMD never move |
 
 ## References
 
