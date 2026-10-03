@@ -84,10 +84,42 @@ structural.
 
 ## Topologies evaluated
 
+All three topologies are answers to one question: **where does the MCP
+process run, and what stands between the agent and the vault?** The vault
+box (Write API, QMD daemon, vault) is identical and never moves — only the
+left side changes.
+
+Legend: `─▶` network hop (needs the tailnet up) · `◁▷` local pipe/process
+boundary (no network) · 🔒 point where a token/auth is required.
+
 ### Topology 1 — Network-facing MCP (Streamable HTTP) on a remote host
 
 The MCP server becomes a long-lived HTTP service on the tailnet; agents
 connect with a URL (+ token) instead of spawning a local process.
+
+```mermaid
+flowchart LR
+    subgraph agents["Agent host(s) — any tailnet machine"]
+        client["MCP client (OpenCode, Claude Code, …)"]
+    end
+    subgraph mcphost["NEW remote MCP host"]
+        mcp["MCP server<br/>(long-lived HTTP service)"]
+    end
+    subgraph vaultbox["Self-hosted server (unchanged)"]
+        api["Write API"]
+        qmd["QMD daemon"]
+        vault[("Vault")]
+    end
+
+    client -- "Streamable HTTP · 🔒 token" --> mcp
+    mcp -- "HTTP · tailnet" --> api
+    mcp -- "HTTP · tailnet" --> qmd
+    api --> vault
+```
+
+Two network legs per call (agent → MCP host, MCP host → upstreams). The MCP
+process is shared by every agent, so it must authenticate callers and stay
+up for everyone.
 
 - **Pros**: one MCP deployment shared by all agent hosts; no Node/runtime
   requirement on agent hosts; client config shrinks to a URL; server-side
@@ -104,6 +136,28 @@ connect with a URL (+ token) instead of spawning a local process.
 The MCP process runs wherever the agent runs; `AMS_API_URL`/`AMS_QMD_URL`
 point at tailnet addresses of the self-hosted server.
 
+```mermaid
+flowchart LR
+    subgraph agent["Agent host — where the agent already runs"]
+        client["MCP client (OpenCode)"]
+        mcp["MCP server<br/>(local child process, stdio)"]
+        client <-. "stdio pipe (no network)" .-> mcp
+    end
+    subgraph vaultbox["Self-hosted server (unchanged)"]
+        api["Write API"]
+        qmd["QMD daemon"]
+        vault[("Vault")]
+    end
+
+    mcp -- "HTTP · tailnet · no auth" --> api
+    mcp -- "HTTP · tailnet · no auth" --> qmd
+    api --> vault
+```
+
+One network leg per call. The MCP process is not network-facing at all — it
+is spawned by the agent and talks to its client over a local pipe — so the
+tailnet is the only boundary and no token exists to leak or rotate.
+
 - **Pros**: zero code changes (this is today's `bin.ts`); zero auth surface on
   the MCP side (the tailnet is the boundary — traffic never leaves the
   private network); one fewer network hop; stdio compatibility everywhere;
@@ -116,6 +170,34 @@ point at tailnet addresses of the self-hosted server.
 
 A gateway accepts network MCP connections and fans out to N stdio server
 processes.
+
+```mermaid
+flowchart LR
+    subgraph agents["Agent host(s)"]
+        client["MCP client"]
+    end
+    subgraph gwhost["NEW gateway host"]
+        gateway["MCP gateway"]
+        mcp1["stdio MCP server"]
+        mcpN["stdio MCP server N"]
+        gateway <-. "spawns / manages" .-> mcp1
+        gateway <-. "spawns / manages" .-> mcpN
+    end
+    subgraph vaultbox["Self-hosted server (unchanged)"]
+        api["Write API"]
+        qmd["QMD daemon"]
+        vault[("Vault")]
+    end
+
+    client -- "HTTP · 🔒 token" --> gateway
+    mcp1 -- "HTTP · tailnet" --> api
+    mcpN -- "HTTP · tailnet" --> qmd
+```
+
+Same two network legs as topology 1 plus a translation layer: the gateway
+converts network MCP into local stdio processes. It exists to serve *many*
+servers behind one endpoint — with exactly one server, it is a second
+component to operate with nothing to fan out to.
 
 - **Pros**: centralizes transport, auth and versioning for many servers;
   stdio servers stay untouched.
