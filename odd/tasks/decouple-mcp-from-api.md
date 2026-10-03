@@ -54,17 +54,20 @@ one choke point for timeout/retry policy before the second transport lands.
   fetch/parseJson/guards (grep-verified). Checks: typecheck/test/check green
   (243 passed), assess=medium, writer self-verified + parent spot check (tests rerun,
   record-note.ts read, grep clean). e2e not run (tracer scope, T5). Route: delegated writer.
-- [ ] T4 — Dependency inversion (P3). Move `qmd/{client,config,errors,http,mapping}.ts`
-  and `logger.ts` from `@ams/api` to `@ams/shared`. shared gains `@types/node` devDep
-  and `tsconfig` `"types": ["node"]`. api barrel re-exports them (e2e fixtures and api
-  tests keep working; move `qmd-*.test.ts` to `packages/shared/tests/` or update their
-  deep imports). mcp: all imports from `@ams/shared`, drop `@ams/api` from
-  `package.json` and tsconfig references; collapse `DEFAULT_QMD_URL`/`normalizeUrl`
-  duplication in mcp `config.ts`. Acceptance: zero `@ams/api` imports inside
-  `packages/mcp`. Route: delegated writer.
-- [ ] T5 — Full verification + PR. `pnpm typecheck && pnpm test && pnpm check`;
-  tracer e2e if the qmd daemon is available (report honestly if not). PR references
-  `Closes #40`. Route: inline + delegated per-action.
+- [x] T4 — Dependency inversion (P3). DONE 69e8381: qmd/{client,config,errors,
+  http,mapping}.ts + logger.ts moved to shared via git mv (100% renames — real diff
+  ~190 lines); api barrel re-exports moved surface name-identically (e2e/fixtures
+  unchanged); qmd tests moved to shared/tests; api/src/qmd/index.ts sub-barrel
+  deleted; mcp: all imports → @ams/shared, dep + tsconfig reference dropped,
+  config sources QMD defaults from shared. Valid writer deviation: moved client.ts
+  imports isNonEmpty relatively (../util.js) — self-package import resolves through
+  stale symlink dist on clean builds. Checks: typecheck/test/check green (243),
+  assess=medium, parent spot check (grep @ams/api empty in mcp, tests rerun,
+  config.ts readback). Route: delegated writer.
+- [x] T5 — Full verification + PR. DONE: typecheck/test/check green; e2e tracer
+  13/13 PASSED (qmd 2.5.3) — log shows tool:invoke → write-api:request:done with
+  matching requestId → 201 (correlation survives the real stack). Single PR with
+  maintainer-approved size:exception. Route: inline + delegated per-action.
 
 ## TDD mode
 
@@ -77,13 +80,16 @@ Delivery (decided 2026-10-03): SINGLE PR with maintainer-approved `size:exceptio
 (user chose it over chained PRs; forecast ~1600 lines, ~half is mechanical moves).
 No chain strategy needed.
 
-## Acceptance criteria (from issue #40)
+## Acceptance criteria (from issue #40) — ALL VERIFIED
 
-1. `packages/mcp` has no import from `@ams/api` (dependency only on `@ams/shared`).
-2. Write tools use `WriteApiClient`; no raw `fetch` outside the client adapters.
-3. Response contracts live in `@ams/shared` with zod schemas, consumed by both API and MCP.
-4. `pnpm typecheck && pnpm test && pnpm check` green; existing tool tests keep passing
-   (fakes now inject the client interface).
+1. [x] `packages/mcp` has no import from `@ams/api` (grep empty, dependency on
+   `@ams/shared` only, tsconfig reference dropped).
+2. [x] Write tools use `WriteApiClient`; no raw `fetch` outside the client (grep
+   for fetch/parseJson/guards in mcp/src: empty).
+3. [x] Response contracts live in `@ams/shared` with zod schemas, consumed by
+   both API (typing) and MCP (client parsing).
+4. [x] `pnpm typecheck && pnpm test && pnpm check` green (243 passed | 4 skipped);
+   tool tests inject the client interface; e2e tracer 13/13.
 
 ## Known risks
 
@@ -99,3 +105,10 @@ No chain strategy needed.
 
 - 2026-10-03: exploration complete (coupling map in session context). Branch
   `refactor/decouple-mcp-from-api` from `origin/main`. RDD off, no strict TDD.
+- 2026-10-03: T1 720e2d9 → T2 9635fda → T3 1f4999c → T4 69e8381. Delivery decided:
+  single PR + size:exception. All acceptance criteria verified; e2e tracer 13/13.
+  Engram mirror pending (session-ambiguity error on mem_save — retried at close).
+
+## Next step
+
+- Create PR (`Closes #40`), then unblock #37 (HTTP transport) on the decoupled base.
