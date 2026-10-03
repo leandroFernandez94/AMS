@@ -1,16 +1,11 @@
 #!/usr/bin/env node
 import { serve } from "@hono/node-server";
-import { getConfig, MCP_TOKEN_ENV } from "./config.js";
-import { createHttpApp } from "./http-app.js";
+import { getConfig } from "./config.js";
+import { assertHttpConfig, createHttpApp } from "./http-app.js";
 
 async function main(): Promise<void> {
   const config = getConfig();
-
-  // The token may legitimately be absent for stdio, but this entrypoint only
-  // exists to serve HTTP — refuse to run unauthenticated.
-  if (!config.token) {
-    throw new Error(`${MCP_TOKEN_ENV} is required for the HTTP transport (bearer token)`);
-  }
+  assertHttpConfig(config);
 
   const app = createHttpApp({
     token: config.token,
@@ -23,7 +18,21 @@ async function main(): Promise<void> {
     process.stderr.write(`[ams-mcp-http] listening on http://${info.address}:${info.port}\n`);
   });
 
+  // Listener-level failures (e.g. EADDRINUSE) surface as an "error" event,
+  // not in main()'s catch — keep the same fatal shape instead of an
+  // uncaught-exception crash.
+  server.on("error", (err: Error) => {
+    process.stderr.write(`[ams-mcp-http] fatal: ${err.message}\n`);
+    process.exit(1);
+  });
+
   const shutdown = () => {
+    // Drain idle keep-alive sockets so close() is not held open by pooled
+    // connections. Declared on http.Server since Node 18.2; ServerType also
+    // admits http2 servers, hence the runtime feature check.
+    if ("closeIdleConnections" in server) {
+      server.closeIdleConnections();
+    }
     server.close(() => process.exit(0));
   };
   process.on("SIGTERM", shutdown);

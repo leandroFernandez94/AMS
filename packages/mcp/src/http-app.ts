@@ -10,6 +10,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
+import { ConfigError, MCP_TOKEN_ENV, type McpConfig } from "./config.js";
 import { createServer } from "./server.js";
 import type { ServerDeps } from "./types.js";
 
@@ -46,6 +47,20 @@ async function probeUpstream(baseUrl: string): Promise<UpstreamStatus> {
 }
 
 /**
+ * Fails fast when the config cannot serve HTTP securely.
+ *
+ * The token may legitimately be absent for stdio (the config is shared), but
+ * the HTTP entrypoint exists to serve HTTP — refuse to run unauthenticated.
+ * Kept here (not in `config.ts`) so the shared stdio config stays permissive
+ * and the guard itself is unit-testable without spawning the entrypoint.
+ */
+export function assertHttpConfig(config: McpConfig): void {
+  if (!config.token) {
+    throw new ConfigError(`${MCP_TOKEN_ENV} is required for the HTTP transport (bearer token)`);
+  }
+}
+
+/**
  * Builds the Streamable HTTP application.
  *
  * Routes:
@@ -61,7 +76,7 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   // an unauthenticated GET yields 401, not 405.
   app.use("/mcp", bearerAuth({ token: options.token }));
 
-  app.on(["GET", "DELETE", "PUT", "PATCH"], "/mcp", (c) =>
+  app.on(["GET", "DELETE", "PUT", "PATCH", "OPTIONS"], "/mcp", (c) =>
     c.text("Method Not Allowed", 405, { Allow: "POST" }),
   );
 
@@ -71,8 +86,10 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     });
-    await server.connect(transport);
     try {
+      // connect() lives inside the try: a rejected handshake must still
+      // close the server instead of leaking the per-request pair.
+      await server.connect(transport);
       return await transport.handleRequest(c.req.raw);
     } finally {
       // server.close() closes the transport; both are per-request only.

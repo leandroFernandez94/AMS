@@ -18,7 +18,7 @@ import {
   MCP_PORT_ENV,
   MCP_TOKEN_ENV,
 } from "../src/config.js";
-import { createHttpApp } from "../src/http-app.js";
+import { assertHttpConfig, createHttpApp } from "../src/http-app.js";
 
 const TOKEN = "test-token";
 
@@ -102,6 +102,12 @@ describe("http config", () => {
 
   it("trims a provided token", () => {
     expect(getConfig({ [MCP_TOKEN_ENV]: "  secret  " }).token).toBe("secret");
+  });
+
+  it("assertHttpConfig throws ConfigError naming AMS_MCP_TOKEN when the token is empty", () => {
+    expect(() => assertHttpConfig(getConfig({}))).toThrow(ConfigError);
+    expect(() => assertHttpConfig(getConfig({ [MCP_TOKEN_ENV]: "   " }))).toThrow(/AMS_MCP_TOKEN/);
+    expect(() => assertHttpConfig(getConfig({ [MCP_TOKEN_ENV]: "secret" }))).not.toThrow();
   });
 });
 
@@ -197,7 +203,7 @@ describe("streamable http server", () => {
   });
 
   it("answers 405 with Allow: POST for non-POST methods with a valid token", async () => {
-    for (const method of ["GET", "DELETE", "PUT", "PATCH"] as const) {
+    for (const method of ["GET", "DELETE", "PUT", "PATCH", "OPTIONS"] as const) {
       const response = await fetch(`${mcpUrl}/mcp`, {
         method,
         headers: { Authorization: `Bearer ${TOKEN}` },
