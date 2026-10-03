@@ -1,7 +1,9 @@
 # Remote MCP Deployment — Investigation (#27)
 
 Status: DECIDED — revised 2026-10-03 after review: topology 1 is the target
-(phased). See [Recommendation](#recommendation).
+(phased). Phase 1 (#37) is implemented on `feat/mcp-streamable-http` — not
+yet merged or deployed. See [Recommendation](#recommendation) and the
+[Phase 1 runbook](#phase-1-runbook-streamable-http).
 Date: 2026-10-03
 
 ## Context
@@ -64,6 +66,19 @@ structural.
   (RFC 9728 metadata routes, discovery) is available but only pays off with
   real authorization servers and multiple users.
 
+> **Auth revision (2026-10-03, user-approved).** Phase 1 ships Hono's
+> `bearer-auth` middleware, not the SDK's `requireBearerAuth`. Evidence
+> (verified against installed sources): `requireBearerAuth` is Express-typed
+> middleware (`RequestHandler` from `express`, which is not a workspace
+> dependency) and rejects tokens that lack a numeric future `expiresAt` —
+> designed for OAuth flows, awkward for a static token. Hono 4.12.27 was
+> already in the dependency graph (`packages/api`); its `bearerAuth` compares
+> timing-safely and emits proper `WWW-Authenticate` challenges, and the SDK's
+> own docs show the Hono integration for the web-standard transport
+> (`transport.handleRequest(c.req.raw)`). Phase 2 (#39) still plans the
+> SDK's OAuth 2.1 resource-server machinery — only the phase 1 static-token
+> mechanism is revised.
+
 ### Client support
 
 - **OpenCode** (primary client): first-class remote MCP — `"type": "remote"`
@@ -81,7 +96,9 @@ structural.
 
 - The ghcr.io image (#18) already builds `packages/mcp` (Dockerfile compiles
   shared + api + mcp), so a remote host can pull one image and run either an
-  upstream or (with a small entrypoint addition) an MCP process.
+  upstream or an MCP process — the HTTP entrypoint
+  (`packages/mcp/dist/http.js`, #37) now ships in the image, no Dockerfile
+  change needed.
 
 ## Topologies evaluated
 
@@ -278,10 +295,12 @@ separate *service*, not a separate machine.
 
 - **Phase 1 — tailnet service (#37)**: MCP as a long-lived HTTP service on
   the existing server, reachable at its tailnet address. Stateless Streamable
-  HTTP behind a static bearer token (`requireBearerAuth`), upstreams at
+  HTTP behind a static bearer token (Hono `bearerAuth` — see the
+  [auth revision](#sdk-support-official-typescript-sdk)), upstreams at
   localhost. Own agents (OpenCode on any tailnet host) switch from local
   stdio to the remote URL. Deployment becomes one image update; no public
-  exposure.
+  exposure. **Status: implemented on `feat/mcp-streamable-http` — see #37
+  and the [Phase 1 runbook](#phase-1-runbook-streamable-http).**
 - **Phase 2 — public reachability for external apps (#39)**: Claude app /
   ChatGPT clients run on vendor clouds and cannot reach a tailnet-only
   service. The existing cloudflared tunnel on the same server fronts the MCP
@@ -290,7 +309,8 @@ separate *service*, not a separate machine.
   alone is not an acceptable boundary between the public internet and write
   access to the vault.
 
-Topology 2 remains the running baseline until phase 1 ships. Topology 3
+Topology 2 remains the running baseline until phase 1 is merged and deployed
+(phase 1 is implemented on `feat/mcp-streamable-http`; see #37). Topology 3
 stays rejected (one server, one user — nothing to fan out).
 
 ### Decision summary
@@ -301,9 +321,154 @@ stays rejected (one server, one user — nothing to fan out).
 | Auth         | Phase 1: static bearer token, tailnet-only. Phase 2: OAuth 2.1 / tunnel-fronted access for public |
 | Network      | MCP runs on the existing self-hosted server: own agents reach it via tailnet (phase 1), external apps via cloudflared public HTTPS (phase 2). Upstreams stay localhost. Vault/API/QMD never move |
 
+## Phase 1 runbook (Streamable HTTP)
+
+Implemented on `feat/mcp-streamable-http` (see #37); not yet merged or
+deployed. The stdio path is byte-for-byte unchanged and remains the
+local/fallback transport.
+
+### Quick path (local)
+
+1. Generate a token (see the charset note below):
+
+   ```bash
+   openssl rand -base64 32
+   ```
+
+2. Build and start the service — both forms are equivalent:
+
+   ```bash
+   pnpm build
+
+   # direct node invocation
+   AMS_MCP_TOKEN="<token>" AMS_API_URL=http://localhost:3000 \
+     node packages/mcp/dist/http.js
+
+   # or via the package bin (linked by pnpm on install)
+   AMS_MCP_TOKEN="<token>" AMS_API_URL=http://localhost:3000 pnpm exec ams-mcp-http
+   ```
+
+3. Verify:
+
+   ```bash
+   curl -s http://127.0.0.1:3111/health
+   # {"status":"ok","upstreams":{"api":"up","qmd":"up"}}
+
+   curl -i -X POST http://127.0.0.1:3111/mcp
+   # HTTP/1.1 401 Unauthorized + WWW-Authenticate: Bearer realm=""
+   ```
+
+Point a remote-capable client at `http://<host>:3111/mcp` with an
+`Authorization: Bearer <token>` header.
+
+### Configuration
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `AMS_MCP_TOKEN` | Yes (HTTP mode) | — | Static bearer token for `POST /mcp`. Startup fails fast when missing or empty; stdio mode ignores it. |
+| `AMS_MCP_PORT` | No | `3111` | TCP port for the HTTP listener. Must be a non-negative number (validated at startup). |
+| `AMS_MCP_HOST` | No | `127.0.0.1` | Bind address. Loopback by default; set `0.0.0.0` inside a container and let the port mapping control exposure. |
+| `AMS_API_URL` | Yes | — | Write API base URL (no trailing slash). Used by the tools and the `/health` probe. |
+| `AMS_QMD_URL` | No | `http://localhost:8181` | QMD base URL. Used by the tools and the `/health` probe. |
+
+> **Token charset.** Hono's `bearer-auth` validates the token value in the
+> `Authorization` header against `[A-Za-z0-9._~+/-]+=*` (verified in
+> hono@4.12.27). A token containing any other character (embedded `=`, `:`,
+> spaces, …) gets a `400` on every request. `openssl rand -base64 32`
+> output qualifies.
+
+### Endpoints
+
+| Method & path | Auth | Behavior |
+| --- | --- | --- |
+| `POST /mcp` | Bearer token | MCP endpoint. Stateless: a fresh server + transport per request, JSON responses (`enableJsonResponse`), no sessions, no server-initiated SSE. |
+| Other methods on `/mcp` | Bearer token | `405` with `Allow: POST` (a missing or bad token still yields `401` — auth runs before method routing). |
+| `GET /health` | None | Upstream probe: `200` when both upstreams are `up`, `503` otherwise. Probes run in parallel with a 2s timeout each. |
+
+Auth failures (Hono `bearerAuth`):
+
+- missing `Authorization` header → `401`, `WWW-Authenticate: Bearer realm=""`
+- valid charset, wrong value → `401`, `WWW-Authenticate: Bearer error="invalid_token"`
+  (timing-safe comparison)
+- malformed token (charset) → `400`, `WWW-Authenticate: Bearer error="invalid_request"`
+
+`GET /health` response shapes:
+
+```json
+// 200 — both upstreams reachable
+{ "status": "ok", "upstreams": { "api": "up", "qmd": "up" } }
+
+// 503 — at least one upstream not up
+{ "status": "degraded", "upstreams": { "api": "up", "qmd": "down" } }
+```
+
+Per-upstream values: `up` (probe returned 2xx), `down` (failure, non-2xx, or
+timeout), `unconfigured` (empty base URL — counts as not ok). The endpoint
+reports reachability only, never note content.
+
+### Process behavior
+
+- Logs to stderr only (`[ams-mcp-http] listening on ...`); stdout stays clean.
+- `SIGTERM`/`SIGINT` → graceful close (idle keep-alive sockets drained) then
+  exit 0 — `docker stop` terminates cleanly.
+- Listener errors (e.g. `EADDRINUSE`) → fatal stderr line, exit 1.
+- Missing `AMS_MCP_TOKEN` → startup fails fast: the entrypoint refuses to
+  serve unauthenticated.
+- Starts with upstreams down: configuration is lazy, tools degrade per call,
+  `/health` reports `down`, the process stays up.
+
+### Compose service (self-hosted stack)
+
+The ghcr.io image already ships `packages/mcp/dist` and its production
+dependencies, so no Dockerfile change is needed — the service only overrides
+the command. Overriding `command` replaces the image's boot sequence, so this
+container runs *only* the MCP service; the upstreams are the existing stack
+services reached over the container network:
+
+```yaml
+services:
+  ams-mcp:
+    image: ghcr.io/leandrofernandez94/ams:latest
+    command: node packages/mcp/dist/http.js
+    environment:
+      AMS_MCP_TOKEN: "${AMS_MCP_TOKEN:?set in .env}" # openssl rand -base64 32
+      AMS_MCP_HOST: "0.0.0.0" # bind-all inside the container
+      AMS_API_URL: "http://ams:3000" # existing Write API service (adjust name)
+      AMS_QMD_URL: "http://ams:8181" # existing QMD daemon (adjust name)
+    ports:
+      - "<tailnet-ip>:3111:3111" # publish on the tailnet interface ONLY
+    healthcheck:
+      # the image's built-in HEALTHCHECK probes the Write API, not this
+      # service — this service needs its own stanza
+      test: ["CMD", "wget", "-q", "-T", "4", "-t", "1", "-O", "/dev/null", "http://localhost:3111/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+```
+
+Notes:
+
+- `wget` is available in the image (installed in the runtime stage) and
+  treats the `503` degraded response as failure — an unreachable upstream
+  marks the container unhealthy while the process keeps running. Treat
+  unhealthy as "investigate upstreams", not "restart the service".
+- The port mapping publishes on the host's tailnet address
+  (`<tailnet-ip>` here — adjust to your host); nothing listens on the LAN or
+  public interfaces.
+
+> **Tailnet-only in phase 1.** The static token is defense in depth (see
+> [Security model](#security-model)) — the tailnet is the boundary. Do NOT
+> publish `AMS_MCP_PORT` on a public interface or through a public tunnel.
+> Public exposure is phase 2 (#39) and requires OAuth 2.1 or tunnel-fronted
+> access control.
+
 ## References
 
 - `packages/mcp/src/bin.ts`, `config.ts`, `server.ts` — current architecture
+- `packages/mcp/src/http.ts`, `http-app.ts` — phase 1 Streamable HTTP
+  entrypoint and Hono app (see #37)
 - Model Context Protocol TypeScript SDK docs — Streamable HTTP transport,
   session management, `requireBearerAuth` (retrieved 2026-10-03 via context7)
 - OpenCode docs — remote MCP configuration (retrieved 2026-10-03 via context7)
