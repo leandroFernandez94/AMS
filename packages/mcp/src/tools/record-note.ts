@@ -29,7 +29,11 @@ const inputSchema = {
     .describe(
       "Stable key for topic upserts: a note already carrying this key is updated " +
         "in place, even when the title or type changes (the file moves to the new " +
-        "canonical path and the old file is removed — no orphans)",
+        "canonical path and the old file is removed — no orphans). " +
+        "Format: lowercase ASCII path segments ([a-z0-9-]) joined by / (regex: " +
+        "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$). No uppercase, underscores, " +
+        "spaces or accents — transliterate first: energia/banos is valid; " +
+        "energia/baños, GTD/Inbox and note_key are not.",
     ),
   tags: z.array(z.string().min(1)).optional().describe("Tags for categorization"),
   date: z.string().optional().describe("ISO date YYYY-MM-DD; defaults to today UTC"),
@@ -53,8 +57,10 @@ export function registerRecordNote(server: McpServer, deps: RecordNoteDeps): voi
         "Routing: a payload with topic_key updates the note already carrying that key " +
         "in place, even if the title changed (the file is renamed, no orphan left behind). " +
         "Without topic_key, a title that resolves to an occupied path returns the " +
-        "existing note's full content as a conflict (not an error) — retitle the note " +
-        "or pass overwrite: true to replace the existing one.",
+        "existing note's full content as a conflict — this is not an error: retitle " +
+        "the note, or retry the same call with overwrite: true to replace the existing " +
+        "one. If topic_key keeps failing validation, omit topic_key and retry with " +
+        "overwrite: true.",
       inputSchema,
     },
     async (args): Promise<CallToolResult> => {
