@@ -1,6 +1,7 @@
 # Remote MCP Deployment — Investigation (#27)
 
-Status: DECIDED — see [Recommendation](#recommendation).
+Status: DECIDED — revised 2026-10-03 after review: topology 1 is the target
+(phased). See [Recommendation](#recommendation).
 Date: 2026-10-03
 
 ## Context
@@ -218,22 +219,20 @@ component to operate with nothing to fan out to.
 
 ## Security model
 
-For a single-user, tailnet-only deployment:
+For a single-user deployment, phased:
 
-- **Tailnet reachability is the primary boundary.** No public exposure, no
-  ingress, no DNS that resolves outside the tailnet. This is acceptable as
-  the *only* boundary for topology 2 because the MCP process is not
-  network-listening at all.
-- **A network transport must add a token regardless of tailnet trust** (defense
-  in depth: a compromised tailnet peer, a misconfigured `serve`/funnel, or a
-  laptop joining the tailnet should not get write access to the memory vault
-  for free). Minimum viable: a static bearer token verified by
-  `requireBearerAuth`, delivered via env, no scoping. OAuth 2.1 machinery is
-  explicitly deferred — it solves multi-user/multi-tenant problems AMS does
-  not have.
+- **Phase 1 (tailnet-only service)**: tailnet reachability is the primary
+  boundary; the static bearer token is defense in depth (a compromised
+  tailnet peer or a misconfigured funnel must not get free write access to
+  the memory vault). The MCP listens on the tailnet interface only.
+- **Phase 2 (public exposure)**: the bar rises. The token alone is NOT an
+  acceptable boundary between the public internet and vault writes — it must
+  be OAuth 2.1 (the SDK's resource-server machinery with RFC 9728 metadata)
+  or tunnel-fronted Cloudflare Access in front of the route, plus HTTPS via
+  the existing cloudflared tunnel.
 - Upstream traffic (MCP → API/QMD) stays plain HTTP *inside* the tailnet;
-  WireGuard encryption covers the transport. No TLS work needed until
-  something leaves the tailnet.
+  WireGuard encryption covers the transport. No TLS work needed for upstream
+  legs even in phase 2 — only the public MCP edge needs HTTPS.
 
 ## Operational concerns (apply to any remote variant)
 
@@ -250,26 +249,48 @@ For a single-user, tailnet-only deployment:
 
 ## Recommendation
 
-1. **Baseline stays topology 2 (stdio where agents live, upstreams over the
-   tailnet).** It is the already-running architecture, needs zero code,
-   carries zero auth surface, has universal client compatibility and the
-   fewest failure modes. The vault and its upstreams never move.
-2. **Add an optional Streamable HTTP transport to `packages/mcp` as a
-   follow-up** (#37): a second entrypoint (or env-selected mode in `bin.ts`)
-   using `StreamableHTTPServerTransport` in **stateless** mode behind
-   `requireBearerAuth` with a static token, exposed tailnet-only. This keeps
-   the package ready for agent hosts that cannot run local processes, at
-   ~100 lines, without disturbing the stdio path.
-3. **Defer**: OAuth 2.1 flows, gateway/proxy topologies, and any public
-   internet exposure. None maps to a current single-user tailnet reality.
+> **Revised after review.** The original recommendation kept stdio as the
+> baseline. Two review considerations outweigh the minimal-surface argument:
+
+### Why topology 1 wins on review
+
+1. **Deployment centralization.** With stdio, every MCP change means pulling
+   and deploying the artifact on every agent host (N hosts). With a
+   network-facing MCP, one image update reaches every client on its next
+   `initialize` — clients never need to be touched.
+2. **Clients on hosts we do not control.** Mobile/web apps (Claude app
+   custom connectors, ChatGPT connectors) speak remote MCP over HTTPS; they
+   cannot spawn local stdio processes at all. Topology 2 makes these clients
+   unreachable by construction; topology 1 unlocks them.
+
+The trade is explicit: we accept one more network leg and a token to manage
+in exchange for centralized deploys and client portability.
+
+### Phased plan
+
+- **Phase 1 — tailnet service (#37)**: MCP as a long-lived HTTP service on
+  the tailnet. Stateless Streamable HTTP behind a static bearer token
+  (`requireBearerAuth`). Own agents (OpenCode on any tailnet host) switch
+  from local stdio to the remote URL. Deployment becomes one image update;
+  no public exposure.
+- **Phase 2 — public reachability for external apps (follow-up issue)**:
+  Claude app / ChatGPT clients run on vendor clouds and cannot reach a
+  tailnet-only service. Exposing the MCP publicly requires HTTPS via the
+  existing cloudflared tunnel *and* a real auth upgrade (OAuth 2.1 resource
+  server, or tunnel-fronted Cloudflare Access) — a static token alone is not
+  an acceptable boundary between the public internet and write access to
+  the vault.
+
+Topology 2 remains the running baseline until phase 1 ships. Topology 3
+stays rejected (one server, one user — nothing to fan out).
 
 ### Decision summary
 
-| Question                    | Answer                                        |
-| --------------------------- | --------------------------------------------- |
-| Transport                   | stdio baseline; optional stateless Streamable HTTP behind a token (#37) |
-| Auth                        | Tailnet boundary for stdio; + static bearer token for HTTP |
-| Network model               | All traffic tailnet-only; vault/API/QMD never move |
+| Question     | Answer                                                  |
+| ------------ | ------------------------------------------------------- |
+| Transport    | Stateless Streamable HTTP (target); stdio stays as migration fallback |
+| Auth         | Phase 1: static bearer token, tailnet-only. Phase 2: OAuth 2.1 / tunnel-fronted access for public |
+| Network      | MCP on the tailnet (phase 1); public HTTPS via cloudflared for external apps (phase 2). Vault/API/QMD never move |
 
 ## References
 
