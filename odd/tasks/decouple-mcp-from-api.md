@@ -44,14 +44,16 @@ one choke point for timeout/retry policy before the second transport lands.
   (242 passed), assess=medium, writer self-verified + parent spot check (tests rerun,
   content-type/header + Logger signature claims verified against source).
   Route: delegated writer.
-- [ ] T3 — Migrate the four write tools to the client (P1). `record-note.ts`,
-  `delete-note.ts`, `list-tags.ts`, `list-types.ts` drop fetch/parse/guards and the
-  local `UpsertResult` re-declaration. `server.ts` wires `deps.writeApiClient ??
-  new WriteApiClient(...)` (keep per-invocation laziness pattern). `errors.ts` maps
-  typed client errors to the SAME output strings. MCP tests: write-tool fakes inject
-  the client interface instead of mocked fetch. Includes the documented drift fix:
-  validation issues read `issue.field` (real API shape) instead of `issue.path`;
-  test mocks updated to the real shape `{field, message}`. Route: delegated writer.
+- [x] T3 — Migrate the four write tools to the client (P1). DONE 1f4999c:
+  tools call lazy `resolveWriteApiClient` (new src/write-api.ts); errors.ts swaps
+  the three write mappers for `mapWriteApiClientError`; ServerDeps: fetch→writeApiClient;
+  tests inject client interface, correlation asserted at client seam, list_tags
+  no-request-id pinned. Empty-URL/unexpected-payload branches keep isError:true
+  (code reality — brief premise was wrong, verified vs source). Documented correction:
+  validation mocks now use real {field, message} shape. mcp/src has ZERO raw
+  fetch/parseJson/guards (grep-verified). Checks: typecheck/test/check green
+  (243 passed), assess=medium, writer self-verified + parent spot check (tests rerun,
+  record-note.ts read, grep clean). e2e not run (tracer scope, T5). Route: delegated writer.
 - [ ] T4 — Dependency inversion (P3). Move `qmd/{client,config,errors,http,mapping}.ts`
   and `logger.ts` from `@ams/api` to `@ams/shared`. shared gains `@types/node` devDep
   and `tsconfig` `"types": ["node"]`. api barrel re-exports them (e2e fixtures and api

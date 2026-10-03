@@ -6,8 +6,7 @@
  * breaks server startup. The empty-URL guard itself lives inside
  * `WriteApiClient` — the single choke point issue #40 asked for.
  */
-import type { Logger } from "@ams/api";
-import { WriteApiClient } from "@ams/shared";
+import { type Logger, WriteApiClient } from "@ams/shared";
 
 /** Collaborators a write tool needs to reach the Write API. */
 export interface WriteApiDeps {

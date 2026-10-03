@@ -35,9 +35,9 @@ import {
 
 /**
  * Minimal structural logger the client needs. Deliberately a method-signature
- * subset of the Write API's `Logger` (packages/api/src/logger.ts, moved into
- * shared by task T4): any Logger satisfies this interface structurally, so T4
- * can swap the import without touching call sites.
+ * subset of the shared `Logger` (packages/shared/src/logger.ts, moved from the
+ * Write API by task T4): any Logger satisfies this interface structurally, so
+ * future cleanup can swap the import without touching call sites.
  */
 export interface WriteApiLogger {
   debug(msg: string, fields?: Record<string, unknown>): void;
