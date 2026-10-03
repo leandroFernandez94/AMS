@@ -33,3 +33,20 @@ export {
 } from "./note.js";
 export { deriveId, isIsoDate, slugify } from "./slug.js";
 export { isNonEmpty, newRequestId, PACKAGE_NAME, REQUEST_ID_HEADER } from "./util.js";
+export {
+  type RecordNoteInput,
+  WriteApiClient,
+  type WriteApiClientOptions,
+  type WriteApiLogger,
+  type WriteApiRequestOptions,
+} from "./write-api/client.js";
+export {
+  type ExistingNoteSummary,
+  NoteExistsError,
+  WriteApiConfigError,
+  WriteApiError,
+  WriteApiNotFoundError,
+  WriteApiUnavailableError,
+  WriteApiUnexpectedPayloadError,
+  WriteApiValidationError,
+} from "./write-api/errors.js";
