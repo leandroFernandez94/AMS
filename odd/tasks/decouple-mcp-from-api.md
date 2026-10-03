@@ -28,14 +28,12 @@ one choke point for timeout/retry policy before the second transport lands.
 
 ## Task list
 
-- [ ] T1 — Shared response contracts (P2). New `packages/shared/src/api-contracts.ts`:
-  zod schemas + inferred types for the wire shapes: `UpsertResponse {id, path,
-  created, moved_from?}`, `DeleteResponse {deleted, path, note, raw?}`,
-  `TagsResponse {tags: TagCount[]}` (move/export `TagCount {name, count}`),
-  `TypesResponse {types: string[]}`, `ValidationErrorIssue {field, message}`.
-  Export from shared barrel. API `app.ts` response typing consumes them.
-  api barrel may re-export for compat (keep `notes.test.ts` green).
-  Route: delegated writer.
+- [x] T1 — Shared response contracts (P2). DONE 720e2d9: `api-contracts.ts` created
+  (DeleteResponse.note typed precisely via composed FrontmatterSchema, `z.literal(true)`
+  for deleted); TagCount moved to shared as canonical; api barrel re-exports shared
+  types; vault UpsertResult untouched (notes.test.ts uses it as vault shape — no
+  collision). Checks: typecheck/test/check green (224 passed), assess=medium,
+  writer self-verified + parent spot check. Route: delegated writer.
 - [ ] T2 — `WriteApiClient` (P1). New `packages/shared/src/write-api/` (`client.ts`,
   `errors.ts`): typed methods `recordNote(input)`, `deleteNote(file)`, `listTags()`,
   `listTypes()`; options `{url, fetch?, timeoutMs?, logger?}`; Write API error mapping
