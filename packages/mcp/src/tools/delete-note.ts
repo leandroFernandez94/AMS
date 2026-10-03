@@ -1,14 +1,13 @@
 import type { Logger } from "@ams/api";
-import { newRequestId, REQUEST_ID_HEADER } from "@ams/shared";
+import { newRequestId, WriteApiError } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../errors.js";
+import { mapUnknownError, mapWriteApiClientError, toMcpText } from "../errors.js";
+import { resolveWriteApiClient, type WriteApiDeps } from "../write-api.js";
 
 /** Collaborators needed by the `delete_note` tool. */
-export interface DeleteNoteDeps {
-  apiUrl: string;
-  fetch: typeof fetch;
+export interface DeleteNoteDeps extends WriteApiDeps {
   logger: Logger;
 }
 
@@ -38,48 +37,16 @@ export function registerDeleteNote(server: McpServer, deps: DeleteNoteDeps): voi
       // Keys only — argument VALUES must never reach the logs.
       deps.logger.info("tool:invoke:start", { tool, requestId, argsKeys: Object.keys(args) });
       const run = async (): Promise<CallToolResult> => {
-        const apiUrl = deps.apiUrl.trim();
-        if (!apiUrl) {
-          return {
-            content: [{ type: "text", text: "AMS_API_URL is not configured" }],
-            isError: true,
-          };
-        }
-
-        // Encode each segment separately: the slashes that structure the
-        // path stay literal while special characters in names are escaped.
-        const encoded = args.file.split("/").map(encodeURIComponent).join("/");
-        let response: Response;
         try {
-          response = await deps.fetch(`${apiUrl}/notes/${encoded}`, {
-            method: "DELETE",
-            headers: { [REQUEST_ID_HEADER]: requestId },
-          });
-        } catch {
-          return toMcpError("Write API unavailable");
-        }
-
-        try {
-          if (!response.ok) {
-            const body = await parseJson(response);
-            if (response.status === 404) {
-              // Not-found is the expected delete failure and deserves a
-              // clearer message than the generic 404 mapping.
-              return toMcpError(`Note not found: ${args.file}`);
-            }
-            return mapWriteApiError(response.status, body);
-          }
-
-          const body = await parseJson(response);
-          if (!isDeleteResult(body)) {
-            return {
-              content: [{ type: "text", text: "Write API returned an unexpected payload" }],
-              isError: true,
-            };
-          }
-
-          return toMcpText(`Note deleted: ${body.path}`);
+          const client = resolveWriteApiClient(deps);
+          // Per-segment path encoding is the client's concern; the not-found
+          // miss is rendered from this tool's own argument in the mapper.
+          const result = await client.deleteNote(args.file, { requestId });
+          return toMcpText(`Note deleted: ${result.path}`);
         } catch (err) {
+          if (err instanceof WriteApiError) {
+            return mapWriteApiClientError(err, { file: args.file });
+          }
           return mapUnknownError(err);
         }
       };
@@ -103,29 +70,5 @@ export function registerDeleteNote(server: McpServer, deps: DeleteNoteDeps): voi
         throw error;
       }
     },
-  );
-}
-
-/** Parses the response body as JSON when possible, falling back to an empty object. */
-async function parseJson(response: Response): Promise<Record<string, unknown>> {
-  try {
-    return (await response.json()) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-/** Write API delete response shape. */
-interface DeleteResult {
-  deleted: boolean;
-  path: string;
-}
-
-function isDeleteResult(value: unknown): value is DeleteResult {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    (value as Record<string, unknown>).deleted === true &&
-    typeof (value as Record<string, unknown>).path === "string"
   );
 }

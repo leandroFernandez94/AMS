@@ -1,8 +1,23 @@
 import type { JsonRpcRequest, JsonRpcResponse, JsonRpcTransport, LogEntry } from "@ams/api";
 import { createLogger, QmdClient, QmdUnavailableError } from "@ams/api";
+import {
+  type DeleteResponse,
+  NoteExistsError,
+  type RecordNoteInput,
+  type TagsResponse,
+  type TypesResponse,
+  type UpsertResponse,
+  type WriteApiClient,
+  WriteApiNotFoundError,
+  type WriteApiRequestOptions,
+  WriteApiUnavailableError,
+  WriteApiUnexpectedPayloadError,
+  WriteApiValidationError,
+} from "@ams/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { API_URL_ENV } from "../src/config.js";
 import { createServer } from "../src/server.js";
 
 /** Connects an SDK `Client` to the provided `McpServer` over a linked in-memory transport pair. */
@@ -14,36 +29,43 @@ async function createTestClient(server: ReturnType<typeof createServer>): Promis
   return client;
 }
 
-/** Builds a `fetch` mock that records the request and returns a configured response. */
-function mockFetch(response: { ok: boolean; status: number; json: unknown }): {
-  fetch: typeof globalThis.fetch;
-  lastRequest: () =>
-    | {
-        url?: string;
-        method?: string;
-        body?: unknown;
-        headers?: Record<string, string>;
-      }
-    | undefined;
+/** A write-tool call as observed at the `WriteApiClient` seam. */
+type WriteApiCall =
+  | { method: "recordNote"; input: RecordNoteInput; requestId?: string }
+  | { method: "deleteNote"; file: string; requestId?: string }
+  | { method: "listTags" }
+  | { method: "listTypes"; requestId?: string };
+
+/**
+ * Creates a fake `WriteApiClient` that records every call and answers from
+ * `handler`: return a typed result for the success path, or throw one of the
+ * typed client errors to drive an error branch. `WriteApiClient` holds
+ * private state, so the structural fake is cast onto the class.
+ */
+function fakeWriteApiClient(handler: (call: WriteApiCall) => unknown): {
+  client: WriteApiClient;
+  calls: WriteApiCall[];
 } {
-  let last: { url?: string; method?: string; body?: unknown; headers?: Record<string, string> };
-  const fetch = vi.fn(async (url, init) => {
-    last = {
-      url: typeof url === "string" ? url : undefined,
-      method: init && typeof init === "object" && "method" in init ? init.method : undefined,
-      body: init && typeof init === "object" && "body" in init ? init.body : undefined,
-      headers:
-        init && typeof init === "object" && "headers" in init
-          ? (init.headers as Record<string, string>)
-          : undefined,
-    };
-    return {
-      ok: response.ok,
-      status: response.status,
-      json: async () => response.json,
-    } as Response;
-  });
-  return { fetch: fetch as unknown as typeof globalThis.fetch, lastRequest: () => last };
+  const calls: WriteApiCall[] = [];
+  const answer = (call: WriteApiCall): unknown => {
+    calls.push(call);
+    return handler(call);
+  };
+  const fake = {
+    recordNote: async (input: RecordNoteInput, opts?: WriteApiRequestOptions) =>
+      answer({ method: "recordNote", input, requestId: opts?.requestId }) as UpsertResponse,
+    deleteNote: async (file: string, opts?: WriteApiRequestOptions) =>
+      answer({ method: "deleteNote", file, requestId: opts?.requestId }) as DeleteResponse,
+    listTags: async () => answer({ method: "listTags" }) as TagsResponse,
+    listTypes: async (opts?: WriteApiRequestOptions) =>
+      answer({ method: "listTypes", requestId: opts?.requestId }) as TypesResponse,
+  };
+  return { client: fake as unknown as WriteApiClient, calls };
+}
+
+/** Extracts the request id a tool forwarded to the client, if any. */
+function requestIdOf(call: WriteApiCall | undefined): string | undefined {
+  return call && "requestId" in call ? call.requestId : undefined;
 }
 
 /** Logger that buffers parsed entries so tests can assert on structured output. */
@@ -92,6 +114,7 @@ function toolResource(
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 // -----------------------------------------------------------------------------
@@ -133,12 +156,12 @@ describe("tool catalog", () => {
 
 describe("record_note", () => {
   it("creates a new note and returns id, path, and created status", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 201,
-      json: { id: "abc123", path: "notes/2026-07-27-hello.md", created: true },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      id: "abc123",
+      path: "notes/2026-07-27-hello.md",
+      created: true,
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -146,23 +169,22 @@ describe("record_note", () => {
       arguments: { title: "Hello", type: "note", body: "body text" },
     });
 
-    expect(lastRequest()?.url).toBe("http://localhost:3000/notes");
-    expect(JSON.parse((lastRequest()?.body as string | undefined) ?? "{}")).toEqual({
-      title: "Hello",
-      type: "note",
-      body: "body text",
+    expect(calls[0]).toEqual({
+      method: "recordNote",
+      input: { title: "Hello", type: "note", body: "body text" },
+      requestId: expect.any(String),
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0]?.text).toBe("Note recorded: abc123 at notes/2026-07-27-hello.md");
   });
 
   it("reports an update when the Write API returns created:false", async () => {
-    const { fetch } = mockFetch({
-      ok: true,
-      status: 200,
-      json: { id: "abc123", path: "notes/2026-07-27-hello.md", created: false },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => ({
+      id: "abc123",
+      path: "notes/2026-07-27-hello.md",
+      created: false,
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -174,17 +196,13 @@ describe("record_note", () => {
   });
 
   it("reports a rename with moved_from in the success text", async () => {
-    const { fetch } = mockFetch({
-      ok: true,
-      status: 200,
-      json: {
-        id: "abc123",
-        path: "notes/renamed.md",
-        created: false,
-        moved_from: "notes/original.md",
-      },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => ({
+      id: "abc123",
+      path: "notes/renamed.md",
+      created: false,
+      moved_from: "notes/original.md",
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -204,19 +222,14 @@ describe("record_note", () => {
   });
 
   it("surfaces a 409 note_exists conflict as a non-error result with the old content and guidance", async () => {
-    const { fetch } = mockFetch({
-      ok: false,
-      status: 409,
-      json: {
-        error: "note_exists",
-        existing: {
-          id: "hello",
-          path: "notes/hello.md",
-          body: "---\nid: hello\n---\n\noriginal body",
-        },
-      },
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new NoteExistsError("Note already exists: hello at notes/hello.md", {
+        id: "hello",
+        path: "notes/hello.md",
+        body: "---\nid: hello\n---\n\noriginal body",
+      });
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -236,8 +249,13 @@ describe("record_note", () => {
   });
 
   it("keeps other 4xx/5xx statuses on the error path", async () => {
-    const { fetch } = mockFetch({ ok: false, status: 409, json: { error: "something_else" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable: 409", {
+        status: 409,
+        body: { error: "something_else" },
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -250,12 +268,12 @@ describe("record_note", () => {
   });
 
   it("passes overwrite through to the Write API payload", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 200,
-      json: { id: "abc123", path: "notes/hello.md", created: false },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      id: "abc123",
+      path: "notes/hello.md",
+      created: false,
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -264,18 +282,14 @@ describe("record_note", () => {
     });
 
     expect(result.isError).toBeFalsy();
-    expect(JSON.parse((lastRequest()?.body as string | undefined) ?? "{}")).toMatchObject({
-      title: "Hello",
-      overwrite: true,
+    expect(calls[0]).toMatchObject({
+      method: "recordNote",
+      input: { title: "Hello", overwrite: true },
     });
   });
 
   it("documents the conflict flow and topic_key format in the tool and field descriptions", async () => {
-    const server = createServer({
-      apiUrl: "http://localhost:3000",
-      fetch: vi.fn(),
-      logger: silentLogger,
-    });
+    const server = createServer({ logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.listTools();
@@ -301,15 +315,14 @@ describe("record_note", () => {
   });
 
   it("returns a validation error on Write API 400", async () => {
-    const { fetch } = mockFetch({
-      ok: false,
-      status: 400,
-      json: {
-        error: "Validation failed",
-        issues: [{ message: "title is required", path: ["title"] }],
-      },
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      // Real-API issue shape is {field, message}; the client renders the
+      // messages alone, without a field prefix.
+      throw new WriteApiValidationError("Validation error: title is required", [
+        { field: "title", message: "title is required" },
+      ]);
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -319,24 +332,22 @@ describe("record_note", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Validation error");
-    expect(result.content[0]?.text).toContain("title: title is required");
+    expect(result.content[0]?.text).toContain("title is required");
   });
 
   it("surfaces the kebab-case validation error for a malformed tag", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: false,
-      status: 400,
-      json: {
-        error: "validation_error",
-        issues: [
+    const { client: writeApi, calls } = fakeWriteApiClient(() => {
+      throw new WriteApiValidationError(
+        "Validation error: tags must be lowercase kebab-case (letters, digits, hyphens)",
+        [
           {
+            field: "tags",
             message: "tags must be lowercase kebab-case (letters, digits, hyphens)",
-            path: ["tags", "0"],
           },
         ],
-      },
+      );
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -346,19 +357,22 @@ describe("record_note", () => {
 
     // The malformed tag passes the tool's shape-only input schema and is
     // rejected by the shared frontmatter schema in the Write API.
-    expect(JSON.parse((lastRequest()?.body as string | undefined) ?? "{}")).toMatchObject({
-      tags: ["Salud"],
-    });
+    expect(calls[0]).toMatchObject({ method: "recordNote", input: { tags: ["Salud"] } });
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Validation error");
     expect(result.content[0]?.text).toContain(
-      "tags.0: tags must be lowercase kebab-case (letters, digits, hyphens)",
+      "tags must be lowercase kebab-case (letters, digits, hyphens)",
     );
   });
 
   it("returns an unavailable error on Write API 500", async () => {
-    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable: 500", {
+        status: 500,
+        body: { error: "boom" },
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -370,11 +384,13 @@ describe("record_note", () => {
     expect(result.content[0]?.text).toBe("Write API unavailable: 500");
   });
 
-  it("returns an unavailable error when fetch throws", async () => {
-    const fetch = vi.fn(async () => {
-      throw new Error("connection refused");
-    }) as unknown as typeof globalThis.fetch;
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+  it("returns an unavailable error when the client cannot reach the Write API", async () => {
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable", {
+        cause: new Error("connection refused"),
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -387,8 +403,12 @@ describe("record_note", () => {
   });
 
   it("returns an error when the Write API returns a malformed payload", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnexpectedPayloadError("Write API returned an unexpected payload", {
+        foo: "bar",
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -401,8 +421,12 @@ describe("record_note", () => {
   });
 
   it("rejects a missing required field before calling upstream", async () => {
-    const fetch = vi.fn(async () => new Response());
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      id: "x",
+      path: "y.md",
+      created: true,
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -412,12 +436,13 @@ describe("record_note", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Input validation error");
-    expect(fetch).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
   });
 
   it("fails when AMS_API_URL is not configured", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 201, json: {} });
-    const server = createServer({ apiUrl: "", fetch, logger: silentLogger });
+    // No client injected: the default client is built from the empty URL and
+    // refuses to send — the guard now lives in the client layer.
+    const server = createServer({ apiUrl: "", logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -435,13 +460,14 @@ describe("record_note", () => {
 // -----------------------------------------------------------------------------
 
 describe("delete_note", () => {
-  it("sends DELETE with a per-segment encoded URL", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 200,
-      json: { deleted: true, path: "decisions/my note.md", note: null, raw: "x" },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+  it("passes the vault-relative path to the Write API client", async () => {
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      deleted: true,
+      path: "decisions/my note.md",
+      note: null,
+      raw: "x",
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -450,22 +476,22 @@ describe("delete_note", () => {
     });
 
     expect(result.isError).toBeFalsy();
-    expect(lastRequest()?.method).toBe("DELETE");
-    // Slashes structure the path; only the special characters are escaped.
-    expect(lastRequest()?.url).toBe("http://localhost:3000/notes/decisions/my%20note.md");
+    // The tool forwards the raw vault path; per-segment URL encoding is the
+    // client's concern (covered by the shared client's own tests).
+    expect(calls[0]).toEqual({
+      method: "deleteNote",
+      file: "decisions/my note.md",
+      requestId: expect.any(String),
+    });
   });
 
   it("renders the deleted path on success", async () => {
-    const { fetch } = mockFetch({
-      ok: true,
-      status: 200,
-      json: {
-        deleted: true,
-        path: "decisions/use-qmd.md",
-        note: { frontmatter: { id: "use-qmd" }, body: "b" },
-      },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => ({
+      deleted: true,
+      path: "decisions/use-qmd.md",
+      note: null,
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -478,12 +504,12 @@ describe("delete_note", () => {
   });
 
   it("maps a 404 to a clear not-found error instead of the generic mapping", async () => {
-    const { fetch } = mockFetch({
-      ok: false,
-      status: 404,
-      json: { error: "not_found", message: "No note at decisions/missing.md" },
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      // Distinct from the expected output: the tool renders the miss from
+      // its own argument, not from the API's message.
+      throw new WriteApiNotFoundError("No note at decisions/missing.md");
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -495,16 +521,17 @@ describe("delete_note", () => {
     expect(result.content[0]?.text).toBe("Note not found: decisions/missing.md");
   });
 
-  it("maps a 400 to a validation error via the shared Write API mapping", async () => {
-    const { fetch } = mockFetch({
-      ok: false,
-      status: 400,
-      json: {
-        error: "validation_error",
-        issues: [{ message: "path must end in .md", path: ["path"] }],
-      },
+  it("maps a 400 to a validation error via the shared client mapping", async () => {
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiValidationError(
+        "Validation error: path must end in .md; type must not be empty",
+        [
+          { field: "path", message: "path must end in .md" },
+          { field: "type", message: "type must not be empty" },
+        ],
+      );
     });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -514,12 +541,18 @@ describe("delete_note", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Validation error");
-    expect(result.content[0]?.text).toContain("path: path must end in .md");
+    expect(result.content[0]?.text).toContain("path must end in .md");
+    expect(result.content[0]?.text).toContain("type must not be empty");
   });
 
   it("returns an unavailable error on Write API 500", async () => {
-    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable: 500", {
+        status: 500,
+        body: { error: "boom" },
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -531,11 +564,13 @@ describe("delete_note", () => {
     expect(result.content[0]?.text).toBe("Write API unavailable: 500");
   });
 
-  it("returns an unavailable error when fetch throws", async () => {
-    const fetch = vi.fn(async () => {
-      throw new Error("connection refused");
-    }) as unknown as typeof globalThis.fetch;
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+  it("returns an unavailable error when the client cannot reach the Write API", async () => {
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable", {
+        cause: new Error("connection refused"),
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -548,8 +583,12 @@ describe("delete_note", () => {
   });
 
   it("returns an error when the Write API returns a malformed payload", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnexpectedPayloadError("Write API returned an unexpected payload", {
+        foo: "bar",
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -562,8 +601,8 @@ describe("delete_note", () => {
   });
 
   it("fails when AMS_API_URL is not configured", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: {} });
-    const server = createServer({ apiUrl: "", fetch, logger: silentLogger });
+    // No client injected: the default client guards the empty URL.
+    const server = createServer({ apiUrl: "", logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -576,8 +615,12 @@ describe("delete_note", () => {
   });
 
   it("rejects an empty file argument before calling upstream", async () => {
-    const fetch = vi.fn(async () => new Response());
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      deleted: true,
+      path: "x.md",
+      note: null,
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -587,7 +630,7 @@ describe("delete_note", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Input validation error");
-    expect(fetch).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -597,17 +640,15 @@ describe("delete_note", () => {
 
 describe("list_types", () => {
   it("calls GET /types on the Write API and returns the type list", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 200,
-      json: { types: ["decision", "learning", "pattern"] },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      types: ["decision", "learning", "pattern"],
+    }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
 
-    expect(lastRequest()?.url).toBe("http://localhost:3000/types");
+    expect(calls[0]).toEqual({ method: "listTypes", requestId: expect.any(String) });
     expect(result.isError).toBeFalsy();
     const text = result.content[0]?.text as string;
     expect(text).toContain("decision");
@@ -616,11 +657,7 @@ describe("list_types", () => {
   });
 
   it("instructs agents to prefer existing types in the description", async () => {
-    const server = createServer({
-      apiUrl: "http://localhost:3000",
-      fetch: vi.fn(),
-      logger: silentLogger,
-    });
+    const server = createServer({ logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.listTools();
@@ -630,8 +667,8 @@ describe("list_types", () => {
   });
 
   it("returns a non-error message for an empty type list", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { types: [] } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => ({ types: [] }));
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -641,8 +678,13 @@ describe("list_types", () => {
   });
 
   it("returns an unavailable error on Write API 500", async () => {
-    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable: 500", {
+        status: 500,
+        body: { error: "boom" },
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -651,11 +693,13 @@ describe("list_types", () => {
     expect(result.content[0]?.text).toBe("Write API unavailable: 500");
   });
 
-  it("returns an unavailable error when fetch throws", async () => {
-    const fetch = vi.fn(async () => {
-      throw new Error("connection refused");
-    }) as unknown as typeof globalThis.fetch;
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+  it("returns an unavailable error when the client cannot reach the Write API", async () => {
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable", {
+        cause: new Error("connection refused"),
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -665,8 +709,12 @@ describe("list_types", () => {
   });
 
   it("returns an error when the Write API returns a malformed payload", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger: silentLogger });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnexpectedPayloadError("Write API returned an unexpected payload", {
+        foo: "bar",
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi, logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -676,8 +724,8 @@ describe("list_types", () => {
   });
 
   it("fails when AMS_API_URL is not configured", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { types: [] } });
-    const server = createServer({ apiUrl: "", fetch, logger: silentLogger });
+    // No client injected: the default client guards the empty URL.
+    const server = createServer({ apiUrl: "", logger: silentLogger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_types", arguments: {} });
@@ -693,22 +741,19 @@ describe("list_types", () => {
 
 describe("list_tags", () => {
   it("calls GET /tags on the Write API and returns the vocabulary", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 200,
-      json: {
-        tags: [
-          { name: "finanzas", count: 3 },
-          { name: "2026", count: 1 },
-        ],
-      },
-    });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      tags: [
+        { name: "finanzas", count: 3 },
+        { name: "2026", count: 1 },
+      ],
+    }));
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_tags", arguments: {} });
 
-    expect(lastRequest()?.url).toBe("http://localhost:3000/tags");
+    // Exact match pins the asymmetry: list_tags forwards NO request id.
+    expect(calls[0]).toEqual({ method: "listTags" });
     expect(result.isError).toBeFalsy();
     const text = result.content[0]?.text as string;
     expect(text).toContain("finanzas (3)");
@@ -716,7 +761,7 @@ describe("list_tags", () => {
   });
 
   it("instructs agents to prefer existing tags in the description", async () => {
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch: vi.fn() });
+    const server = createServer();
     const client = await createTestClient(server);
 
     const result = await client.listTools();
@@ -726,8 +771,8 @@ describe("list_tags", () => {
   });
 
   it("returns a non-error message for an empty vocabulary", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { tags: [] } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const { client: writeApi } = fakeWriteApiClient(() => ({ tags: [] }));
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_tags", arguments: {} });
@@ -737,8 +782,13 @@ describe("list_tags", () => {
   });
 
   it("returns an unavailable error on Write API 500", async () => {
-    const { fetch } = mockFetch({ ok: false, status: 500, json: { error: "boom" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable: 500", {
+        status: 500,
+        body: { error: "boom" },
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_tags", arguments: {} });
@@ -747,11 +797,13 @@ describe("list_tags", () => {
     expect(result.content[0]?.text).toBe("Write API unavailable: 500");
   });
 
-  it("returns an unavailable error when fetch throws", async () => {
-    const fetch = vi.fn(async () => {
-      throw new Error("connection refused");
-    }) as unknown as typeof globalThis.fetch;
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+  it("returns an unavailable error when the client cannot reach the Write API", async () => {
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable", {
+        cause: new Error("connection refused"),
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_tags", arguments: {} });
@@ -761,8 +813,12 @@ describe("list_tags", () => {
   });
 
   it("returns an error when the Write API returns a malformed payload", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { foo: "bar" } });
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnexpectedPayloadError("Write API returned an unexpected payload", {
+        foo: "bar",
+      });
+    });
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_tags", arguments: {} });
@@ -772,11 +828,32 @@ describe("list_tags", () => {
   });
 
   it("fails when AMS_API_URL is not configured", async () => {
-    const { fetch } = mockFetch({ ok: true, status: 200, json: { tags: [] } });
-    const server = createServer({ apiUrl: "", fetch });
+    // No client injected: the default client guards the empty URL.
+    const server = createServer({ apiUrl: "" });
     const client = await createTestClient(server);
 
     const result = await client.callTool({ name: "list_tags", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Write API client wiring
+// -----------------------------------------------------------------------------
+
+describe("write API client wiring", () => {
+  it("builds a default client from AMS_API_URL when none is injected", async () => {
+    // No writeApiClient injected: the server must construct the default
+    // client lazily. With an empty configured URL the REAL client refuses
+    // to send, so reaching its guard proves the call went through the
+    // client layer rather than a stub.
+    vi.stubEnv(API_URL_ENV, "");
+    const server = createServer({ logger: silentLogger });
+    const client = await createTestClient(server);
+
+    const result = await client.callTool({ name: "list_types", arguments: {} });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toBe("AMS_API_URL is not configured");
@@ -928,14 +1005,14 @@ describe("get_memory", () => {
 // -----------------------------------------------------------------------------
 
 describe("request-scoped logging", () => {
-  it("record_note forwards the logged requestId as x-request-id and never logs argument values", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 201,
-      json: { id: "abc123", path: "notes/x.md", created: true },
-    });
+  it("record_note forwards the logged requestId to the client and never logs argument values", async () => {
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({
+      id: "abc123",
+      path: "notes/x.md",
+      created: true,
+    }));
     const logger = bufferLogger();
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger });
+    const server = createServer({ writeApiClient: writeApi, logger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -953,8 +1030,8 @@ describe("request-scoped logging", () => {
     expect(done?.ok).toBe(true);
     expect(typeof done?.durationMs).toBe("number");
 
-    // The outgoing Write API call carries the same correlation id.
-    expect(lastRequest()?.headers?.["x-request-id"]).toBe(start?.requestId);
+    // The Write API call carries the same correlation id.
+    expect(requestIdOf(calls[0])).toBe(start?.requestId);
 
     // Keys only — argument VALUES must never reach the logs.
     const all = JSON.stringify(logger.entries);
@@ -962,14 +1039,10 @@ describe("request-scoped logging", () => {
     expect(all).not.toContain("Hello");
   });
 
-  it("list_types sends x-request-id matching its tool log line", async () => {
-    const { fetch, lastRequest } = mockFetch({
-      ok: true,
-      status: 200,
-      json: { types: ["decision"] },
-    });
+  it("list_types sends its logged requestId with the client call", async () => {
+    const { client: writeApi, calls } = fakeWriteApiClient(() => ({ types: ["decision"] }));
     const logger = bufferLogger();
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger });
+    const server = createServer({ writeApiClient: writeApi, logger });
     const client = await createTestClient(server);
 
     await client.callTool({ name: "list_types", arguments: {} });
@@ -978,8 +1051,7 @@ describe("request-scoped logging", () => {
     expect(start?.tool).toBe("list_types");
     expect(start?.requestId).toMatch(/^req_/);
     expect(start?.argsKeys).toEqual([]);
-    expect(lastRequest()?.headers?.["x-request-id"]).toBe(start?.requestId);
-    expect(lastRequest()?.headers?.["content-type"]).toBeUndefined();
+    expect(requestIdOf(calls[0])).toBe(start?.requestId);
   });
 
   it("search_memory logs start/done with a fresh requestId per invocation", async () => {
@@ -1002,11 +1074,13 @@ describe("request-scoped logging", () => {
   });
 
   it("logs tool:invoke:failed when the tool returns an error result", async () => {
-    const fetch = vi.fn(async () => {
-      throw new Error("connection refused");
-    }) as unknown as typeof globalThis.fetch;
+    const { client: writeApi } = fakeWriteApiClient(() => {
+      throw new WriteApiUnavailableError("Write API unavailable", {
+        cause: new Error("connection refused"),
+      });
+    });
     const logger = bufferLogger();
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch, logger });
+    const server = createServer({ writeApiClient: writeApi, logger });
     const client = await createTestClient(server);
 
     const result = await client.callTool({
@@ -1046,13 +1120,13 @@ describe("stdout cleanliness", () => {
   });
 
   it("writes only JSON-RPC frames to stdout during tool calls", async () => {
-    const { fetch } = mockFetch({
-      ok: true,
-      status: 201,
-      json: { id: "x", path: "y.md", created: true },
-    });
+    const { client: writeApi } = fakeWriteApiClient(() => ({
+      id: "x",
+      path: "y.md",
+      created: true,
+    }));
     // No injected logger: this test proves the DEFAULT logger stays off stdout.
-    const server = createServer({ apiUrl: "http://localhost:3000", fetch });
+    const server = createServer({ writeApiClient: writeApi });
     const client = await createTestClient(server);
 
     await client.callTool({
