@@ -1,18 +1,17 @@
+import { type TagCount, WriteApiError } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../errors.js";
+import { mapUnknownError, mapWriteApiClientError, toMcpText } from "../errors.js";
+import { resolveWriteApiClient, type WriteApiDeps } from "../write-api.js";
 
-/** Collaborators needed by the `list_tags` tool. */
-export interface ListTagsDeps {
-  apiUrl: string;
-  fetch: typeof fetch;
-}
-
-/** A tag entry as returned by the Write API `GET /tags` endpoint. */
-interface TagCount {
-  name: string;
-  count: number;
-}
+/**
+ * Collaborators needed by the `list_tags` tool.
+ *
+ * Deliberately logger-less (and request-id-less on the wire): this read-only
+ * vocabulary listing carries no per-invocation logging, an asymmetry the
+ * wire contract preserves verbatim.
+ */
+export type ListTagsDeps = WriteApiDeps;
 
 /**
  * Registers `list_tags`, which lists the tags that currently exist in the
@@ -31,68 +30,15 @@ export function registerListTags(server: McpServer, deps: ListTagsDeps): void {
       inputSchema: {},
     },
     async (): Promise<CallToolResult> => {
-      const apiUrl = deps.apiUrl.trim();
-      if (!apiUrl) {
-        return {
-          content: [{ type: "text", text: "AMS_API_URL is not configured" }],
-          isError: true,
-        };
-      }
-
-      let response: Response;
       try {
-        response = await deps.fetch(`${apiUrl}/tags`);
-      } catch {
-        return toMcpError("Write API unavailable");
-      }
-
-      try {
-        if (!response.ok) {
-          const body = await parseJson(response);
-          return mapWriteApiError(response.status, body);
-        }
-
-        const body = await parseJson(response);
-        if (!isTagsPayload(body)) {
-          return {
-            content: [{ type: "text", text: "Write API returned an unexpected payload" }],
-            isError: true,
-          };
-        }
-
-        return toMcpText(formatTags(body.tags));
+        const client = resolveWriteApiClient(deps);
+        const response = await client.listTags();
+        return toMcpText(formatTags(response.tags));
       } catch (err) {
+        if (err instanceof WriteApiError) return mapWriteApiClientError(err);
         return mapUnknownError(err);
       }
     },
-  );
-}
-
-/** Parses the response body as JSON when possible, falling back to an empty object. */
-async function parseJson(response: Response): Promise<Record<string, unknown>> {
-  try {
-    return (await response.json()) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-/** Write API GET /tags response shape. */
-interface TagsPayload {
-  tags: TagCount[];
-}
-
-function isTagsPayload(value: unknown): value is TagsPayload {
-  const tags = (value as Record<string, unknown> | null)?.tags;
-  return (
-    Array.isArray(tags) &&
-    tags.every(
-      (entry) =>
-        typeof entry === "object" &&
-        entry !== null &&
-        typeof (entry as Record<string, unknown>).name === "string" &&
-        typeof (entry as Record<string, unknown>).count === "number",
-    )
   );
 }
 

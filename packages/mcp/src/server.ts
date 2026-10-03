@@ -28,25 +28,17 @@ export function createServer(deps?: ServerDeps): McpServer {
   // nothing. The default sink is STDERR: stdout carries JSON-RPC frames only.
   const logger: Logger = deps?.logger ?? createLogger((line) => process.stderr.write(`${line}\n`));
 
-  registerRecordNote(server, {
+  // Write tools share the resolved URL and the optional injected client;
+  // each tool builds a default client lazily on first invocation.
+  const writeApi = {
+    writeApiClient: deps?.writeApiClient,
     apiUrl: deps?.apiUrl ?? config.apiUrl,
-    fetch: deps?.fetch ?? globalThis.fetch,
-    logger,
-  });
-  registerDeleteNote(server, {
-    apiUrl: deps?.apiUrl ?? config.apiUrl,
-    fetch: deps?.fetch ?? globalThis.fetch,
-    logger,
-  });
-  registerListTypes(server, {
-    apiUrl: deps?.apiUrl ?? config.apiUrl,
-    fetch: deps?.fetch ?? globalThis.fetch,
-    logger,
-  });
-  registerListTags(server, {
-    apiUrl: deps?.apiUrl ?? config.apiUrl,
-    fetch: deps?.fetch ?? globalThis.fetch,
-  });
+  };
+
+  registerRecordNote(server, { ...writeApi, logger });
+  registerDeleteNote(server, { ...writeApi, logger });
+  registerListTypes(server, { ...writeApi, logger });
+  registerListTags(server, writeApi);
   registerSearchMemory(server, {
     qmdClient: deps?.qmdClient,
     qmdUrl: config.qmdUrl,

@@ -34,16 +34,16 @@ one choke point for timeout/retry policy before the second transport lands.
   types; vault UpsertResult untouched (notes.test.ts uses it as vault shape — no
   collision). Checks: typecheck/test/check green (224 passed), assess=medium,
   writer self-verified + parent spot check. Route: delegated writer.
-- [ ] T2 — `WriteApiClient` (P1). New `packages/shared/src/write-api/` (`client.ts`,
-  `errors.ts`): typed methods `recordNote(input)`, `deleteNote(file)`, `listTags()`,
-  `listTypes()`; options `{url, fetch?, timeoutMs?, logger?}`; Write API error mapping
-  moves here as typed errors (`WriteApiError` base; `NoteExistsError` carrying existing
-  note, `WriteApiValidationError` carrying issues, `WriteApiNotFoundError`,
-  `WriteApiUnavailableError`, `WriteApiConfigError` for empty URL). Parses responses
-  with the shared zod schemas. Default `timeoutMs: 30000` via `AbortSignal.timeout`
-  (the choke point #40 asks for — documented deviation). Per-call `requestId` option on
-  methods that send `x-request-id` today (record/delete/listTypes; NOT listTags).
-  Unit tests with fake fetch in `packages/shared/tests/`. Route: delegated writer.
+- [x] T2 — `WriteApiClient` (P1). DONE 9635fda: `shared/src/write-api/{client,errors}.ts`
+  + 18 unit tests (fake fetch). RecordNoteInput = exact 7-field tool payload;
+  WriteApiLogger structurally = real Logger subset (T4 swap trivial); guard at
+  request time (WriteApiConfigError); timeout choke point send() 30s default;
+  legacy validation rendering preserved byte-identical (message-only, since real
+  API never sent `path`); shared gained @types/node devDep + tsconfig types:["node"];
+  vitest include already covered shared/tests. Checks: typecheck/test/check green
+  (242 passed), assess=medium, writer self-verified + parent spot check (tests rerun,
+  content-type/header + Logger signature claims verified against source).
+  Route: delegated writer.
 - [ ] T3 — Migrate the four write tools to the client (P1). `record-note.ts`,
   `delete-note.ts`, `list-tags.ts`, `list-types.ts` drop fetch/parse/guards and the
   local `UpsertResult` re-declaration. `server.ts` wires `deps.writeApiClient ??
