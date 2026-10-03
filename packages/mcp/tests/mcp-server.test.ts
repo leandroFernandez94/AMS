@@ -270,7 +270,7 @@ describe("record_note", () => {
     });
   });
 
-  it("documents the conflict flow in the tool and field descriptions", async () => {
+  it("documents the conflict flow and topic_key format in the tool and field descriptions", async () => {
     const server = createServer({
       apiUrl: "http://localhost:3000",
       fetch: vi.fn(),
@@ -289,6 +289,15 @@ describe("record_note", () => {
     expect(props.overwrite?.description).toBeTruthy();
     expect(props.overwrite?.description).toContain("collision");
     expect(props.topic_key?.description).toContain("in place");
+
+    // Issue #35: agents must see the topic_key charset rules up front.
+    expect(props.topic_key?.description).toContain("regex");
+    expect(props.topic_key?.description).toContain("energia/banos");
+    expect(props.topic_key?.description).toContain("energia/baños");
+
+    // Issue #35: the conflict and validation rescue patterns must be explicit.
+    expect(tool?.description).toContain("not an error");
+    expect(tool?.description).toContain("omit topic_key");
   });
 
   it("returns a validation error on Write API 400", async () => {
