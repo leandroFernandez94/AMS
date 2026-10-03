@@ -60,9 +60,6 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@ams/api':
-        specifier: workspace:*
-        version: link:../api
       '@ams/shared':
         specifier: workspace:*
         version: link:../shared

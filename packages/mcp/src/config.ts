@@ -4,15 +4,18 @@
  * Configuration is resolved lazily at call time so the server can start even
  * when one upstream is temporarily unavailable. `AMS_API_URL` has no default
  * because the Write API address is deployment-specific; `AMS_QMD_URL` defaults
- * to the local QMD daemon.
+ * to the local QMD daemon. The QMD default/env handling is delegated to the
+ * shared adapter config so the retrieval client and this server can never
+ * drift apart.
  */
+import { DEFAULT_QMD_URL, loadQmdConfig, QMD_URL_ENV } from "@ams/shared";
 
-/** Environment variable names consumed by this package. */
+/** Environment variable name for the Write API URL. */
 export const API_URL_ENV = "AMS_API_URL";
-export const QMD_URL_ENV = "AMS_QMD_URL";
 
-/** Default QMD daemon address. */
-export const DEFAULT_QMD_URL = "http://localhost:8181";
+// Canonical QMD constants live in @ams/shared; re-exported here so existing
+// imports of this module keep resolving.
+export { DEFAULT_QMD_URL, QMD_URL_ENV };
 
 /** Resolved MCP server configuration. */
 export interface McpConfig {
@@ -35,10 +38,9 @@ function normalizeUrl(raw: string): string {
  */
 export function getConfig(env: Record<string, string | undefined> = process.env): McpConfig {
   const apiUrl = env[API_URL_ENV]?.trim();
-  const qmdUrl = env[QMD_URL_ENV]?.trim();
 
   return {
     apiUrl: apiUrl ? normalizeUrl(apiUrl) : "",
-    qmdUrl: qmdUrl ? normalizeUrl(qmdUrl) : DEFAULT_QMD_URL,
+    qmdUrl: loadQmdConfig(env).url,
   };
 }

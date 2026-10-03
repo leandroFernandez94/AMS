@@ -20,6 +20,7 @@ export {
   type ValidationErrorIssue,
   ValidationErrorIssueSchema,
 } from "./api-contracts.js";
+export { createLogger, type LogEntry, type Logger, type LogLevel } from "./logger.js";
 export {
   buildNote,
   type Frontmatter,
@@ -31,6 +32,29 @@ export {
   parseNote,
   serializeNote,
 } from "./note.js";
+export {
+  type GetMemoryInput,
+  QmdClient,
+  type QmdClientOptions,
+  type SearchMemoryInput,
+} from "./qmd/client.js";
+export { DEFAULT_QMD_URL, loadQmdConfig, QMD_URL_ENV, type QmdConfig } from "./qmd/config.js";
+export { QmdError, QmdProtocolError, QmdToolError, QmdUnavailableError } from "./qmd/errors.js";
+export {
+  createFetchTransport,
+  type FetchTransportOptions,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
+  type JsonRpcTransport,
+} from "./qmd/http.js";
+export {
+  type MemoryDoc,
+  type MemoryHit,
+  mapDocument,
+  mapSearchResults,
+  type QmdResource,
+  stripQmdUri,
+} from "./qmd/mapping.js";
 export { deriveId, isIsoDate, slugify } from "./slug.js";
 export { isNonEmpty, newRequestId, PACKAGE_NAME, REQUEST_ID_HEADER } from "./util.js";
 export {

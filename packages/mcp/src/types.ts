@@ -1,5 +1,4 @@
-import type { Logger, QmdClient } from "@ams/api";
-import type { WriteApiClient } from "@ams/shared";
+import type { Logger, QmdClient, WriteApiClient } from "@ams/shared";
 
 /** Injectable collaborators for `createServer`. All optional — production resolves from env. */
 export interface ServerDeps {

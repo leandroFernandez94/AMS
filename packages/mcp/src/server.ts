@@ -1,4 +1,4 @@
-import { createLogger, type Logger } from "@ams/api";
+import { createLogger, type Logger } from "@ams/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getConfig } from "./config.js";
 import { registerDeleteNote } from "./tools/delete-note.js";

@@ -16,6 +16,7 @@ import {
   FrontmatterSchema,
   isCoherent,
   isIsoDate,
+  type Logger,
   type Note,
   newRequestId,
   notePath,
@@ -30,7 +31,6 @@ import { z } from "zod";
 import type { DirtyStore } from "./dirty.js";
 import type { IndexScheduler } from "./indexing/scheduler.js";
 import type { ReleaseFunction, WriteLock } from "./lock.js";
-import type { Logger } from "./logger.js";
 import type { TopicKeyMatch, Vault } from "./vault.js";
 
 /** Hono environment: the per-request correlation id set by the middleware. */
