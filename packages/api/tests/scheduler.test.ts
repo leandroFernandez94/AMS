@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createLogger, type LogEntry, type Logger } from "@ams/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DirtyStore } from "../src/dirty.js";
 import type { Reindexer, ReindexResult } from "../src/indexing/index.js";
 import { IndexScheduler } from "../src/indexing/scheduler.js";
-import { createLogger, type LogEntry, type Logger } from "../src/logger.js";
 
 let dir: string;
 

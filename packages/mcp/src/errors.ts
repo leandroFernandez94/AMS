@@ -1,4 +1,15 @@
-import { type QmdError, QmdProtocolError, QmdToolError, QmdUnavailableError } from "@ams/api";
+import {
+  type ExistingNoteSummary,
+  NoteExistsError,
+  type QmdError,
+  QmdProtocolError,
+  QmdToolError,
+  QmdUnavailableError,
+  WriteApiConfigError,
+  type WriteApiError,
+  WriteApiNotFoundError,
+  WriteApiValidationError,
+} from "@ams/shared";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 /** Builds a plain text MCP result. */
@@ -16,40 +27,25 @@ export function toMcpError(text: string): CallToolResult {
   };
 }
 
-/** Body shape returned by the Write API on a validation failure. */
-interface WriteApiValidationBody {
-  error?: string;
-  issues?: Array<{ message?: string; path?: string[] | string }>;
-}
-
-/** Body shape returned by the Write API on a note_exists conflict (409). */
-interface NoteExistsBody {
-  error?: string;
-  existing?: { id?: string; path?: string; body?: string };
-}
-
 /** How the calling agent resolves a note_exists conflict. */
 const NOTE_EXISTS_GUIDANCE =
   "A note already exists at this title. Review the existing content above; " +
   "either retitle your note, or call record_note again with overwrite: true to replace it.";
 
 /**
- * Maps a 409 `note_exists` conflict into a NORMAL (non-error) result.
+ * Renders a 409 `note_exists` conflict into a NORMAL (non-error) result.
  *
  * The conflict is a protocol outcome the calling agent must resolve — not a
  * failure of the tool — so it is surfaced with the existing note's id, path
- * and full raw markdown body plus explicit guidance on how to proceed.
+ * and full raw markdown body plus explicit guidance on how to proceed. The
+ * client has already applied the field fallbacks ("(unknown id)", ...).
  */
-export function mapNoteExists(body: NoteExistsBody): CallToolResult {
-  const existing = body.existing ?? {};
-  const id = typeof existing.id === "string" ? existing.id : "(unknown id)";
-  const path = typeof existing.path === "string" ? existing.path : "(unknown path)";
-  const raw = typeof existing.body === "string" ? existing.body : "";
+function renderNoteExists(existing: ExistingNoteSummary): CallToolResult {
   const text = [
-    `Note already exists: ${id} at ${path}`,
+    `Note already exists: ${existing.id} at ${existing.path}`,
     "",
     "--- existing note (raw markdown) ---",
-    raw,
+    existing.body,
     "--- end of existing note ---",
     "",
     NOTE_EXISTS_GUIDANCE,
@@ -57,33 +53,37 @@ export function mapNoteExists(body: NoteExistsBody): CallToolResult {
   return { content: [{ type: "text", text }] };
 }
 
-/** Maps a Write API 400 response into a validation error result. */
-export function mapWriteApiValidation(body: WriteApiValidationBody): CallToolResult {
-  const issues = Array.isArray(body.issues)
-    ? body.issues
-        .map((issue) => {
-          const path = Array.isArray(issue.path) ? issue.path.join(".") : issue.path;
-          return path ? `${path}: ${issue.message ?? ""}` : (issue.message ?? "");
-        })
-        .filter(Boolean)
-        .join("; ")
-    : (body.error ?? "invalid request");
-  return toMcpError(`Validation error: ${issues}`);
-}
-
 /**
- * Maps a non-2xx Write API response into a tool result.
+ * Maps a typed `WriteApiClient` failure onto the tool result the pre-client
+ * tools produced for the same HTTP outcome — byte-identical strings.
  *
- * A 409 `note_exists` takes the dedicated non-error path (`mapNoteExists`) —
- * it is a resolvable protocol outcome. Every other failure is an error.
+ * `note_exists` stays the only non-error path (a resolvable protocol
+ * outcome); every other failure is an error result.
  */
-export function mapWriteApiError(
-  status: number,
-  body: WriteApiValidationBody & NoteExistsBody,
+export function mapWriteApiClientError(
+  error: WriteApiError,
+  context?: { file?: string },
 ): CallToolResult {
-  if (status === 400) return mapWriteApiValidation(body);
-  if (status === 409 && body.error === "note_exists") return mapNoteExists(body);
-  return toMcpError(`Write API unavailable: ${status}`);
+  if (error instanceof WriteApiConfigError) {
+    // The client's guard fires on an empty/unconfigured URL; keep the
+    // operator-facing string the tools carried before the migration.
+    return toMcpError("AMS_API_URL is not configured");
+  }
+  if (error instanceof NoteExistsError) {
+    return renderNoteExists(error.existing);
+  }
+  if (error instanceof WriteApiValidationError) {
+    // The client pre-renders the legacy "Validation error: <messages>"
+    // message from the real-API issue shape ({field, message}).
+    return toMcpError(error.message);
+  }
+  if (error instanceof WriteApiNotFoundError && context?.file !== undefined) {
+    // The tool renders the delete miss from ITS argument, not the API message.
+    return toMcpError(`Note not found: ${context.file}`);
+  }
+  // WriteApiUnavailableError and WriteApiUnexpectedPayloadError carry
+  // messages pre-rendered to match today's branch outputs byte-for-byte.
+  return toMcpError(error.message);
 }
 
 /** Maps a `QmdError` subclass into a structured retrieval error result. */

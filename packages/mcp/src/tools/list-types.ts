@@ -1,13 +1,11 @@
-import type { Logger } from "@ams/api";
-import { newRequestId, REQUEST_ID_HEADER } from "@ams/shared";
+import { type Logger, newRequestId, WriteApiError } from "@ams/shared";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { mapUnknownError, mapWriteApiError, toMcpError, toMcpText } from "../errors.js";
+import { mapUnknownError, mapWriteApiClientError, toMcpText } from "../errors.js";
+import { resolveWriteApiClient, type WriteApiDeps } from "../write-api.js";
 
 /** Collaborators needed by the `list_types` tool. */
-export interface ListTypesDeps {
-  apiUrl: string;
-  fetch: typeof fetch;
+export interface ListTypesDeps extends WriteApiDeps {
   logger: Logger;
 }
 
@@ -33,39 +31,12 @@ export function registerListTypes(server: McpServer, deps: ListTypesDeps): void 
       const startedAt = Date.now();
       deps.logger.info("tool:invoke:start", { tool, requestId, argsKeys: Object.keys(args ?? {}) });
       const run = async (): Promise<CallToolResult> => {
-        const apiUrl = deps.apiUrl.trim();
-        if (!apiUrl) {
-          return {
-            content: [{ type: "text", text: "AMS_API_URL is not configured" }],
-            isError: true,
-          };
-        }
-
-        let response: Response;
         try {
-          response = await deps.fetch(`${apiUrl}/types`, {
-            headers: { [REQUEST_ID_HEADER]: requestId },
-          });
-        } catch {
-          return toMcpError("Write API unavailable");
-        }
-
-        try {
-          if (!response.ok) {
-            const body = await parseJson(response);
-            return mapWriteApiError(response.status, body);
-          }
-
-          const body = await parseJson(response);
-          if (!isTypesPayload(body)) {
-            return {
-              content: [{ type: "text", text: "Write API returned an unexpected payload" }],
-              isError: true,
-            };
-          }
-
-          return toMcpText(formatTypes(body.types));
+          const client = resolveWriteApiClient(deps);
+          const response = await client.listTypes({ requestId });
+          return toMcpText(formatTypes(response.types));
         } catch (err) {
+          if (err instanceof WriteApiError) return mapWriteApiClientError(err);
           return mapUnknownError(err);
         }
       };
@@ -90,25 +61,6 @@ export function registerListTypes(server: McpServer, deps: ListTypesDeps): void 
       }
     },
   );
-}
-
-/** Parses the response body as JSON when possible, falling back to an empty object. */
-async function parseJson(response: Response): Promise<Record<string, unknown>> {
-  try {
-    return (await response.json()) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-/** Write API GET /types response shape. */
-interface TypesPayload {
-  types: string[];
-}
-
-function isTypesPayload(value: unknown): value is TypesPayload {
-  const types = (value as Record<string, unknown> | null)?.types;
-  return Array.isArray(types) && types.every((entry) => typeof entry === "string");
 }
 
 /** Formats the type list, nudging the agent away from inventing new types. */

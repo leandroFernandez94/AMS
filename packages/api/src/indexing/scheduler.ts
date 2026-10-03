@@ -18,9 +18,10 @@
  * cron tick (two ticks would be harmless — clearing is idempotent and the
  * second would just find an empty store — but a guard keeps logs clean).
  */
+
+import type { Logger } from "@ams/shared";
 import cron, { type ScheduledTask } from "node-cron";
 import type { DirtyStore } from "../dirty.js";
-import type { Logger } from "../logger.js";
 import type { Reindexer } from "./reindexer.js";
 
 /** Outcome of a single tick. Returned by `tick()` and surfaced by `/admin/reindex`. */

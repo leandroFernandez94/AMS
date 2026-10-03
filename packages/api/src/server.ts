@@ -7,13 +7,13 @@
  */
 
 import { join } from "node:path";
+import { createLogger } from "@ams/shared";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
 import { DirtyStore } from "./dirty.js";
 import { CliReindexer, IndexScheduler, loadIndexConfig } from "./indexing/index.js";
 import { WriteLock } from "./lock.js";
-import { createLogger } from "./logger.js";
 import { Vault } from "./vault.js";
 
 /** Builds the production dependency graph from resolved configuration. */

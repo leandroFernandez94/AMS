@@ -5,6 +5,36 @@
  * MCP layer and integration tests can compose them without starting a real
  * HTTP server. The runnable entry lives in `./server.ts`.
  */
+// Re-exported for compatibility with existing consumers (e.g. integration
+// tests): the canonical wire contracts live in @ams/shared.
+export type {
+  DeleteResponse,
+  TagCount,
+  TagsResponse,
+  TypesResponse,
+  UpsertResponse,
+  ValidationErrorIssue,
+} from "@ams/shared";
+// Re-exported for compatibility with existing consumers (e2e fixtures, api
+// tests): the QMD retrieval adapter and structured logger moved to @ams/shared.
+export {
+  createLogger,
+  type GetMemoryInput,
+  type LogEntry,
+  type Logger,
+  type LogLevel,
+  loadQmdConfig,
+  type MemoryDoc,
+  type MemoryHit,
+  QmdClient,
+  type QmdClientOptions,
+  type QmdConfig,
+  QmdError,
+  QmdProtocolError,
+  QmdToolError,
+  QmdUnavailableError,
+  type SearchMemoryInput,
+} from "@ams/shared";
 export { type AppDeps, createApp, type NoteInput } from "./app.js";
 export {
   type ApiConfig,
@@ -36,19 +66,4 @@ export {
   type TickResult,
 } from "./indexing/index.js";
 export { type ReleaseFunction, WriteLock } from "./lock.js";
-export { createLogger, type LogEntry, type Logger, type LogLevel } from "./logger.js";
-export {
-  type GetMemoryInput,
-  loadQmdConfig,
-  type MemoryDoc,
-  type MemoryHit,
-  QmdClient,
-  type QmdClientOptions,
-  type QmdConfig,
-  QmdError,
-  QmdProtocolError,
-  QmdToolError,
-  QmdUnavailableError,
-  type SearchMemoryInput,
-} from "./qmd/index.js";
-export { type TagCount, type TopicKeyMatch, type UpsertResult, Vault } from "./vault.js";
+export { type TopicKeyMatch, type UpsertResult, Vault } from "./vault.js";
