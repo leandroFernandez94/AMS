@@ -7,6 +7,20 @@
  */
 
 export {
+  type DeleteResponse,
+  DeleteResponseSchema,
+  type TagCount,
+  TagCountSchema,
+  type TagsResponse,
+  TagsResponseSchema,
+  type TypesResponse,
+  TypesResponseSchema,
+  type UpsertResponse,
+  UpsertResponseSchema,
+  type ValidationErrorIssue,
+  ValidationErrorIssueSchema,
+} from "./api-contracts.js";
+export {
   buildNote,
   type Frontmatter,
   FrontmatterSchema,

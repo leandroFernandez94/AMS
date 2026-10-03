@@ -1,0 +1,101 @@
+# Feature: Decouple packages/mcp from packages/api (issue #40)
+
+## Objective
+
+`@ams/mcp` depends only on `@ams/shared`. Clients (`QmdClient`, `WriteApiClient`),
+error classes and the `Logger` contract live in `@ams/shared`. Response contracts
+are parsed by API and MCP from the same zod schemas. Lands BEFORE #37 (HTTP transport).
+
+## Problem / Why
+
+Write tools do raw `fetch` with per-tool parsing and hand-rolled guards;
+`UpsertResult` is re-declared in `record-note.ts`; `packages/mcp` imports the
+server package (`@ams/api`). #37 turns MCP into a long-lived service — we need
+one choke point for timeout/retry policy before the second transport lands.
+
+## Scope
+
+- IN: P1 (`WriteApiClient`), P2 (response contracts to shared), P3 (dependency inversion).
+- OUT: transport changes (#37), auth (#39), behavior changes (except the documented
+  validation-issue drift fix below).
+
+## Constraints
+
+- Tool output strings and error messages stay byte-identical where possible.
+- `list_tags` keeps its current asymmetry (no request-id header, no logger).
+- Lazy client construction must survive (server starts with QMD down).
+- English only in all artifacts (repo policy). Conventional Commits. `Closes #40`.
+
+## Task list
+
+- [ ] T1 — Shared response contracts (P2). New `packages/shared/src/api-contracts.ts`:
+  zod schemas + inferred types for the wire shapes: `UpsertResponse {id, path,
+  created, moved_from?}`, `DeleteResponse {deleted, path, note, raw?}`,
+  `TagsResponse {tags: TagCount[]}` (move/export `TagCount {name, count}`),
+  `TypesResponse {types: string[]}`, `ValidationErrorIssue {field, message}`.
+  Export from shared barrel. API `app.ts` response typing consumes them.
+  api barrel may re-export for compat (keep `notes.test.ts` green).
+  Route: delegated writer.
+- [ ] T2 — `WriteApiClient` (P1). New `packages/shared/src/write-api/` (`client.ts`,
+  `errors.ts`): typed methods `recordNote(input)`, `deleteNote(file)`, `listTags()`,
+  `listTypes()`; options `{url, fetch?, timeoutMs?, logger?}`; Write API error mapping
+  moves here as typed errors (`WriteApiError` base; `NoteExistsError` carrying existing
+  note, `WriteApiValidationError` carrying issues, `WriteApiNotFoundError`,
+  `WriteApiUnavailableError`, `WriteApiConfigError` for empty URL). Parses responses
+  with the shared zod schemas. Default `timeoutMs: 30000` via `AbortSignal.timeout`
+  (the choke point #40 asks for — documented deviation). Per-call `requestId` option on
+  methods that send `x-request-id` today (record/delete/listTypes; NOT listTags).
+  Unit tests with fake fetch in `packages/shared/tests/`. Route: delegated writer.
+- [ ] T3 — Migrate the four write tools to the client (P1). `record-note.ts`,
+  `delete-note.ts`, `list-tags.ts`, `list-types.ts` drop fetch/parse/guards and the
+  local `UpsertResult` re-declaration. `server.ts` wires `deps.writeApiClient ??
+  new WriteApiClient(...)` (keep per-invocation laziness pattern). `errors.ts` maps
+  typed client errors to the SAME output strings. MCP tests: write-tool fakes inject
+  the client interface instead of mocked fetch. Includes the documented drift fix:
+  validation issues read `issue.field` (real API shape) instead of `issue.path`;
+  test mocks updated to the real shape `{field, message}`. Route: delegated writer.
+- [ ] T4 — Dependency inversion (P3). Move `qmd/{client,config,errors,http,mapping}.ts`
+  and `logger.ts` from `@ams/api` to `@ams/shared`. shared gains `@types/node` devDep
+  and `tsconfig` `"types": ["node"]`. api barrel re-exports them (e2e fixtures and api
+  tests keep working; move `qmd-*.test.ts` to `packages/shared/tests/` or update their
+  deep imports). mcp: all imports from `@ams/shared`, drop `@ams/api` from
+  `package.json` and tsconfig references; collapse `DEFAULT_QMD_URL`/`normalizeUrl`
+  duplication in mcp `config.ts`. Acceptance: zero `@ams/api` imports inside
+  `packages/mcp`. Route: delegated writer.
+- [ ] T5 — Full verification + PR. `pnpm typecheck && pnpm test && pnpm check`;
+  tracer e2e if the qmd daemon is available (report honestly if not). PR references
+  `Closes #40`. Route: inline + delegated per-action.
+
+## TDD mode
+
+Off (no strict TDD configured for this project; source: engram search + repo config).
+Runner: `pnpm test` (Vitest). Ordinary functional checks per task.
+
+## Delivery
+
+Delivery (decided 2026-10-03): SINGLE PR with maintainer-approved `size:exception`
+(user chose it over chained PRs; forecast ~1600 lines, ~half is mechanical moves).
+No chain strategy needed.
+
+## Acceptance criteria (from issue #40)
+
+1. `packages/mcp` has no import from `@ams/api` (dependency only on `@ams/shared`).
+2. Write tools use `WriteApiClient`; no raw `fetch` outside the client adapters.
+3. Response contracts live in `@ams/shared` with zod schemas, consumed by both API and MCP.
+4. `pnpm typecheck && pnpm test && pnpm check` green; existing tool tests keep passing
+   (fakes now inject the client interface).
+
+## Known risks
+
+- Two `UpsertResult` concepts share a name (api vault internal vs wire shape) —
+  shared type is the WIRE shape, named `UpsertResponse` to avoid the collision.
+- Byte-identical strings asserted in `mcp-server.test.ts` and e2e regexes
+  (`Note recorded: ...`, `Write API unavailable`, `AMS_API_URL is not configured`,
+  note_exists guidance block, `Note not found: ...` 404 special case).
+- `x-request-id` ↔ logged requestId correlation is asserted; client must thread it.
+- Root vitest config must pick up `packages/shared/tests/` — verify in T2.
+
+## Progress log
+
+- 2026-10-03: exploration complete (coupling map in session context). Branch
+  `refactor/decouple-mcp-from-api` from `origin/main`. RDD off, no strict TDD.

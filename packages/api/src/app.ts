@@ -12,6 +12,7 @@
  */
 import {
   buildNote,
+  type DeleteResponse,
   FrontmatterSchema,
   isCoherent,
   isIsoDate,
@@ -20,6 +21,9 @@ import {
   notePath,
   parseNote,
   REQUEST_ID_HEADER,
+  type TagsResponse,
+  type TypesResponse,
+  type UpsertResponse,
 } from "@ams/shared";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
@@ -117,14 +121,16 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     // Live first-level directory scan via the vault — authoritative with no
     // index dependency, so it works even before the first reindex.
     const types = await deps.vault.listTypes();
-    return c.json({ types });
+    const response: TypesResponse = { types };
+    return c.json(response);
   });
 
   app.get("/tags", async (c) => {
     // Live tolerant scan of the vault frontmatter via the vault — the
     // authoritative tag vocabulary, independent of the QMD index.
     const tags = await deps.vault.listTags();
-    return c.json({ tags });
+    const response: TagsResponse = { tags };
+    return c.json(response);
   });
 
   app.post("/notes", async (c) => recordNote(c, deps));
@@ -317,11 +323,12 @@ async function deleteNoteAt(c: Context<AppEnv>, deps: AppDeps) {
     if (deps.scheduler) {
       void deps.scheduler.tick().catch(() => {});
     }
-    return c.json({
+    const response: DeleteResponse = {
       deleted: true,
       path: relPath,
       ...(note !== null ? { note } : { note: null, raw }),
-    });
+    };
+    return c.json(response);
   } finally {
     release();
   }
@@ -382,7 +389,7 @@ async function persistNote(c: Context<AppEnv>, deps: AppDeps, args: PersistArgs)
         // qmd 2.5.3), so the stale index entry is removed on the next tick.
         await deps.dirty.mark(existing.path, requestId);
       }
-      const response = {
+      const response: UpsertResponse = {
         id: note.frontmatter.id,
         path: newRel,
         created: false,
@@ -405,10 +412,12 @@ async function persistNote(c: Context<AppEnv>, deps: AppDeps, args: PersistArgs)
       path: result.path,
       created: result.created,
     });
-    return c.json(
-      { id: result.id, path: result.path, created: result.created },
-      result.created ? 201 : 200,
-    );
+    const response: UpsertResponse = {
+      id: result.id,
+      path: result.path,
+      created: result.created,
+    };
+    return c.json(response, result.created ? 201 : 200);
   } catch (e) {
     deps.logger.error("record_note:failed", {
       requestId,
