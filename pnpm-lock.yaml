@@ -63,9 +63,15 @@ importers:
       '@ams/shared':
         specifier: workspace:*
         version: link:../shared
+      '@hono/node-server':
+        specifier: ^2.0.6
+        version: 2.0.6(hono@4.12.27)
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
+      hono:
+        specifier: ^4.12.27
+        version: 4.12.27
       zod:
         specifier: ^4.4.3
         version: 4.4.3

@@ -15,7 +15,8 @@
     "dist"
   ],
   "bin": {
-    "ams-mcp": "./dist/bin.js"
+    "ams-mcp": "./dist/bin.js",
+    "ams-mcp-http": "./dist/http.js"
   },
   "scripts": {
     "build": "tsc --build",
@@ -23,7 +24,9 @@
   },
   "dependencies": {
     "@ams/shared": "workspace:*",
+    "@hono/node-server": "^2.0.6",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "hono": "^4.12.27",
     "zod": "^4.4.3"
   }
 }
