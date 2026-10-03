@@ -14,7 +14,14 @@
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { isCoherent, type Note, notePath, parseNote, serializeNote } from "@ams/shared";
+import {
+  isCoherent,
+  type Note,
+  notePath,
+  parseNote,
+  serializeNote,
+  type TagCount,
+} from "@ams/shared";
 
 /** Result of an upsert operation. */
 export interface UpsertResult {
@@ -32,12 +39,6 @@ export interface TopicKeyMatch {
   note: Note;
   /** Vault-relative path of the note file. */
   path: string;
-}
-
-/** A tag in the vault vocabulary, with how many notes carry it. */
-export interface TagCount {
-  name: string;
-  count: number;
 }
 
 export class Vault {

@@ -5,6 +5,16 @@
  * MCP layer and integration tests can compose them without starting a real
  * HTTP server. The runnable entry lives in `./server.ts`.
  */
+// Re-exported for compatibility with existing consumers (e.g. integration
+// tests): the canonical wire contracts live in @ams/shared.
+export type {
+  DeleteResponse,
+  TagCount,
+  TagsResponse,
+  TypesResponse,
+  UpsertResponse,
+  ValidationErrorIssue,
+} from "@ams/shared";
 export { type AppDeps, createApp, type NoteInput } from "./app.js";
 export {
   type ApiConfig,
@@ -51,4 +61,4 @@ export {
   QmdUnavailableError,
   type SearchMemoryInput,
 } from "./qmd/index.js";
-export { type TagCount, type TopicKeyMatch, type UpsertResult, Vault } from "./vault.js";
+export { type TopicKeyMatch, type UpsertResult, Vault } from "./vault.js";
