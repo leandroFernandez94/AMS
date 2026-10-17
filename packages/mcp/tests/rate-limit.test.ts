@@ -121,6 +121,14 @@ describe("rate limit config", () => {
       expect(() => getConfig({ [MCP_RATE_LIMIT_ENV]: raw }), raw).toThrow(/AMS_MCP_RATE_LIMIT/);
     }
   });
+
+  it("treats whitespace-only as unset (fails safe to the default, never to disabled)", () => {
+    // Number(" ") === 0 — without the trim this would silently disable a
+    // security control; it must fall back to the default instead.
+    expect(getConfig({ [MCP_RATE_LIMIT_ENV]: "   " }).rateLimitPerMinute).toBe(
+      DEFAULT_MCP_RATE_LIMIT,
+    );
+  });
 });
 
 // -----------------------------------------------------------------------------

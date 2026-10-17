@@ -213,6 +213,6 @@ export function getConfig(env: Record<string, string | undefined> = process.env)
       audience: env[MCP_OAUTH_AUDIENCE_ENV]?.trim() ?? "",
       publicUrl: env[MCP_PUBLIC_URL_ENV]?.trim() ?? "",
     },
-    rateLimitPerMinute: resolveRateLimit(env[MCP_RATE_LIMIT_ENV]),
+    rateLimitPerMinute: resolveRateLimit(env[MCP_RATE_LIMIT_ENV]?.trim()),
   };
 }
