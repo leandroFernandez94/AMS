@@ -1,12 +1,14 @@
 # Remote MCP Deployment — Investigation (#27)
 
 Status: DECIDED — revised 2026-10-03 after review: topology 1 is the target
-(phased). Phase 1 (#37) is implemented on `feat/mcp-streamable-http` and
-phase 2 (#39) on `feat/mcp-public-oauth` — neither is merged or deployed
-yet. See [Recommendation](#recommendation), the
+(phased). Phase 1 (#37) and phase 2 (#39) are merged and DEPLOYED:
+`https://<public-domain>/mcp` (public OAuth via Auth0) verified
+end-to-end with the Claude app connector on 2026-10-17; ChatGPT connector
+verification pending. See [Recommendation](#recommendation), the
 [Phase 1 runbook](#phase-1-runbook-streamable-http) and the
 [Phase 2 runbook](#phase-2-runbook-public-oauth-exposure).
-Date: 2026-10-03 · phase 2 runbook added 2026-10-17
+Date: 2026-10-03 · phase 2 runbook added 2026-10-17 · field-verified
+troubleshooting added 2026-10-17
 
 ## Context
 
@@ -588,14 +590,28 @@ Once per Auth0 tenant. Dashboard paths verified against the Auth0 docs
 
    - **Name**: `AMS MCP` (display only).
    - **Identifier**: `https://mcp.example.com/mcp`. Auth0 recommends a URL
-     and it never needs to be publicly reachable — but it must equal what
-     the connectors send as the RFC 8707 `resource` parameter, which is the
-     RFC 9728 `resource` value AMS publishes (`<publicUrl>/mcp`). The
-     identifier cannot be modified afterwards. AMS itself accepts any
-     non-empty audience string; using the `/mcp` URL is what makes the
-     connector flows line up end to end.
+      and it never needs to be publicly reachable — but it must equal what
+      the connectors send as the RFC 8707 `resource` parameter, which is the
+      RFC 9728 `resource` value AMS publishes (`<publicUrl>/mcp`). The
+      identifier cannot be modified afterwards. AMS itself accepts any
+      non-empty audience string; using the `/mcp` URL is what makes the
+      connector flows line up end to end.
    - **Signing algorithm**: `RS256` (AMS pins RS256; the token is signed
-     with the tenant's private key).
+      with the tenant's private key).
+
+   **Field-verified 2026-10-17**: an API registered with a free-form
+   identifier (e.g. `https://ams-mcp`) fails the connector flow with
+   `Service not found: <server URL>` in the Auth0 logs — new tenants
+   process the `resource` parameter as the audience, so the identifier
+   MUST be the exact public MCP server URL. `AMS_MCP_OAUTH_AUDIENCE` on
+   the AMS side must be set to the same string.
+
+   **Authorize the connector applications on the API** (required, easy to
+   miss): a newly created API does NOT grant access to existing
+   applications. Open the API > **Applications** (Application Access) and
+   enable every connector application (`AMS MCP — Claude`, ...). Without
+   this toggle the token exchange is rejected even though client
+   credentials and callbacks are correct.
 
 2. **Enable the MCP-relevant tenant toggles** — Settings > Advanced:
 
@@ -659,9 +675,18 @@ Once per Auth0 tenant. Dashboard paths verified against the Auth0 docs
 > **Discovery endpoint note.** Both clients accept either RFC 8414
 > (`/.well-known/oauth-authorization-server`) or OpenID Connect discovery
 > (`/.well-known/openid-configuration`) from the authorization server.
-> Whether Auth0 serves the RFC 8414 document at the tenant root is
-> UNVERIFIED as of 2026-10-17; the OIDC discovery document is the
-> universally available alternative both vendors accept.
+> VERIFIED live 2026-10-17 on a fresh tenant: Auth0 serves the RFC 8414
+> document at the tenant root with the exact issuer (trailing slash
+> included), standard `/authorize` and `/oauth/token` endpoints, and
+> `code_challenge_methods_supported: ["S256", "plain"]` — no additional
+> tenant configuration needed for the discovery chain to work.
+
+> **Tenant Default Audience note.** The tenant-level Default Audience
+> setting is NOT required for the connector flow: the `resource` parameter
+> the connectors send overrides it, and with the API identifier set to the
+> server URL (above) the mapping resolves directly. Setting a Default
+> Audience anyway does not harm, but do not rely on it to fix an identifier
+> mismatch.
 
 ### Connector setup
 
@@ -686,6 +711,15 @@ server must be reachable from the public internet:
    The other options — Claude's published identity (CIMD) and "Register
    automatically" (DCR) — exist, but the manual client matches the Auth0
    setup above.
+
+   **No authorization/token URL fields are requested** (field-verified
+   2026-10-17): Claude discovers the authorization server by itself — the
+   401 `WWW-Authenticate` challenge carries the RFC 9728
+   `resource_metadata` URL, AMS serves the protected-resource document,
+   and Claude reads the authorize/token endpoints from the Auth0
+   discovery metadata. You only supply the server URL and the client
+   credentials; there is nowhere (and no need) to paste an `audience`
+   parameter.
 6. Finish with **Add**, connect, and consent. Claude sends S256 PKCE on
    every authorization request and refreshes tokens automatically.
 
@@ -873,6 +907,22 @@ it for 10 minutes, and refetches automatically when a token presents an
 unknown `kid`. At worst a token signed by a brand-new key pays one extra
 JWKS fetch; verification never needs a deploy or restart.
 
+### Troubleshooting (field-verified 2026-10-17)
+
+Every item below was hit and resolved during the live deployment of
+`https://<public-domain>/mcp` (tenant `<auth0-domain>`).
+Auth0's tenant logs (Dashboard > Monitoring > Logs) name the exact failure —
+start there.
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Auth0 log: `Service not found: <server URL>` during connector login | The API identifier is not the server URL: new Auth0 tenants map the connector's RFC 8707 `resource` parameter to the audience, and no API matches | Create an API whose identifier is EXACTLY `<publicUrl>/mcp`, set `AMS_MCP_OAUTH_AUDIENCE` to the same string, restart `ams-mcp` |
+| API created, identifier correct, token exchange still rejected | The new API does not authorize existing Applications by default | API > **Applications** (Application Access) > enable each connector application |
+| Public URL answers `404` with an `openresty` footer | Cloudflare tunnel ingress is first-match-wins: a wildcard rule (`*.<domain>` → reverse proxy) shadows the specific rule below it | In Zero Trust > Tunnels > Public Hostname, move the specific rule ABOVE the wildcard |
+| Auth0 dashboard: "You don't have permissions to access the resource" when creating a user | Dashboard bug observed on fresh tenants (application/API creation keeps working) | Create a Machine-to-Machine application authorized for the **Auth0 Management API** with the `create:users` scope, get a token from its Test tab, and `POST /api/v2/users` with `{"email","password","connection":"Username-Password-Authentication","email_verified":true}` |
+| Connector login screen shows no way to authenticate | No user exists in the tenant's database connection | Create a user (previous row) or enable a social connection |
+| Connector connects but every tool call returns 401 `invalid_token` | Token audience does not match `AMS_MCP_OAUTH_AUDIENCE` (classic: free-form identifier API + URL-shaped expectation, or a stale env value) | Align both sides on the same string (the resource URL) and restart `ams-mcp` |
+
 ## References
 
 - `packages/mcp/src/bin.ts`, `config.ts`, `server.ts` — current architecture
@@ -908,6 +958,8 @@ Phase 2 (all retrieved 2026-10-17):
 - Auth0 — Register your MCP client application (manual / CIMD / DCR):
   https://auth0.com/ai/docs/mcp/guides/registering-your-mcp-client-application
   (with `/manual-client-registration` and `/dynamic-client-registration`)
+- Auth0 Management API — User creation endpoint used by the dashboard-bug
+  workaround: https://auth0.com/docs/api/management/v2/users/post-users
 - Cloudflare — Tunnel DNS records (CNAME `<uuid>.cfargotunnel.com`):
   https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/dns/
 - Cloudflare — Create a tunnel (dashboard) / published applications:
