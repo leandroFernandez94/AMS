@@ -19,11 +19,13 @@ import { timingSafeEqual } from "hono/utils/buffer";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import {
   ConfigError,
+  DEFAULT_MCP_RATE_LIMIT,
   MCP_TOKEN_ENV,
   type McpConfig,
   type McpOAuthConfig,
   resolveOAuthConfig,
 } from "./config.js";
+import { createRateLimiter } from "./rate-limit.js";
 import { createServer } from "./server.js";
 import type { ServerDeps } from "./types.js";
 
@@ -50,6 +52,11 @@ export interface HttpAppOptions {
   apiUrl: string;
   /** QMD base URL used by the /health probe. Empty means unconfigured. */
   qmdUrl: string;
+  /**
+   * Max requests per minute per client key on `/mcp`. Defaults to
+   * `DEFAULT_MCP_RATE_LIMIT` (120); `0` disables the limiter (no middleware).
+   */
+  rateLimitPerMinute?: number;
   /** Collaborators forwarded to `createServer` for each request. */
   serverDeps?: ServerDeps;
 }
@@ -152,16 +159,26 @@ function createMcpAuth(options: HttpAppOptions): ReturnType<typeof bearerAuth> {
  * Builds the Streamable HTTP application.
  *
  * Routes:
- *  - `POST /mcp`   — MCP endpoint behind dual-credential auth, fresh
- *    transport per request.
+ *  - `POST /mcp`   — MCP endpoint behind rate limiting and dual-credential
+ *    auth, fresh transport per request.
  *  - other methods on `/mcp` — explicit 405 `Allow: POST` (stateless phase 1;
  *    the SDK client treats 405 as "no server-initiated SSE", per spec).
  *  - `GET /.well-known/oauth-protected-resource/mcp` — unauthenticated
  *    RFC 9728 metadata; only mounted when OAuth is configured.
  *  - `GET /health` — unauthenticated upstream probe (200 ok / 503 degraded).
+ *
+ * `/mcp` middleware order is rate-limit → auth: the limiter bounds auth work
+ * (JWT/JWKS network I/O) under floods in both credential modes, while
+ * `/health` and the PRM route stay unlimited — health must answer Docker
+ * checks reliably and PRM is static JSON behind the edge rule (decision 7).
  */
 export function createHttpApp(options: HttpAppOptions): Hono {
   const app = new Hono();
+
+  const rateLimitPerMinute = options.rateLimitPerMinute ?? DEFAULT_MCP_RATE_LIMIT;
+  if (rateLimitPerMinute > 0) {
+    app.use("/mcp", createRateLimiter({ limitPerMinute: rateLimitPerMinute }));
+  }
 
   // Registered before the route handlers so auth runs before method routing:
   // an unauthenticated GET yields 401, not 405.

@@ -8,9 +8,10 @@
  * shared adapter config so the retrieval client and this server can never
  * drift apart.
  *
- * HTTP-mode variables (`AMS_MCP_PORT`, `AMS_MCP_HOST`, `AMS_MCP_TOKEN`, plus
- * the optional OAuth triple) are read by the same resolver because the config
- * is shared with the stdio binary; only the HTTP entrypoint enforces them.
+ * HTTP-mode variables (`AMS_MCP_PORT`, `AMS_MCP_HOST`, `AMS_MCP_TOKEN`, the
+ * optional OAuth triple, `AMS_MCP_RATE_LIMIT`) are read by the same resolver
+ * because the config is shared with the stdio binary; only the HTTP
+ * entrypoint enforces them.
  */
 import { DEFAULT_QMD_URL, loadQmdConfig, QMD_URL_ENV } from "@ams/shared";
 
@@ -39,11 +40,17 @@ export const MCP_OAUTH_AUDIENCE_ENV = "AMS_MCP_OAUTH_AUDIENCE";
 /** Environment variable name for the public HTTPS base URL of this service. */
 export const MCP_PUBLIC_URL_ENV = "AMS_MCP_PUBLIC_URL";
 
+/** Environment variable name for the per-client rate limit on the MCP route. */
+export const MCP_RATE_LIMIT_ENV = "AMS_MCP_RATE_LIMIT";
+
 /** Default TCP port for the optional Streamable HTTP transport. */
 export const DEFAULT_MCP_PORT = 3111;
 
 /** Default bind address: loopback only; broader exposure is a deployment concern. */
 export const DEFAULT_MCP_HOST = "127.0.0.1";
+
+/** Default in-app rate limit on the MCP route: requests/minute per client key. */
+export const DEFAULT_MCP_RATE_LIMIT = 120;
 
 /** Thrown when an environment variable is malformed. */
 export class ConfigError extends Error {
@@ -95,6 +102,11 @@ export interface McpConfig {
   token: string;
   /** Raw OAuth env values, empty string = unset. Validated for HTTP only. */
   oauth: McpOAuthEnv;
+  /**
+   * Max requests per minute per client key on the MCP route. `0` disables
+   * the in-app limiter entirely.
+   */
+  rateLimitPerMinute: number;
 }
 
 /** Removes a trailing slash so callers can append paths safely. */
@@ -167,6 +179,19 @@ function resolveNumber(raw: string | undefined, field: string, defaultValue: num
 }
 
 /**
+ * Validates the rate limit. Unlike the port, a fractional request count is
+ * meaningless, so non-integers are rejected next to negatives.
+ */
+function resolveRateLimit(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return DEFAULT_MCP_RATE_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new ConfigError(`${MCP_RATE_LIMIT_ENV} must be a non-negative integer, got: ${raw}`);
+  }
+  return parsed;
+}
+
+/**
  * Reads configuration from the environment map.
  *
  * Accepts an explicit env map so tests can inject values without mutating
@@ -188,5 +213,6 @@ export function getConfig(env: Record<string, string | undefined> = process.env)
       audience: env[MCP_OAUTH_AUDIENCE_ENV]?.trim() ?? "",
       publicUrl: env[MCP_PUBLIC_URL_ENV]?.trim() ?? "",
     },
+    rateLimitPerMinute: resolveRateLimit(env[MCP_RATE_LIMIT_ENV]),
   };
 }

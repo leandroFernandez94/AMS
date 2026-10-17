@@ -12,6 +12,7 @@ async function main(): Promise<void> {
     oauth,
     apiUrl: config.apiUrl,
     qmdUrl: config.qmdUrl,
+    rateLimitPerMinute: config.rateLimitPerMinute,
   });
 
   const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
