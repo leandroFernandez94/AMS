@@ -2,7 +2,7 @@
 
 Status: DECIDED — revised 2026-10-03 after review: topology 1 is the target
 (phased). Phase 1 (#37) and phase 2 (#39) are merged and DEPLOYED:
-`https://ams.losfernandez.net/mcp` (public OAuth via Auth0) verified
+`https://<public-domain>/mcp` (public OAuth via Auth0) verified
 end-to-end with the Claude app connector on 2026-10-17; ChatGPT connector
 verification pending. See [Recommendation](#recommendation), the
 [Phase 1 runbook](#phase-1-runbook-streamable-http) and the
@@ -31,10 +31,10 @@ labelled "topology 2" below:
 
 ```json
 "ams": {
-  "command": ["node", "/home/leandro/projects/AMS/packages/mcp/dist/bin.js"],
+  "command": ["node", "/path/to/ams/packages/mcp/dist/bin.js"],
   "environment": {
-    "AMS_API_URL": "http://100.64.20.67:3050",
-    "AMS_QMD_URL": "http://100.64.20.67:8182"
+    "AMS_API_URL": "http://<tailnet-ip>:3050",
+    "AMS_QMD_URL": "http://<tailnet-ip>:8182"
   }
 }
 ```
@@ -448,7 +448,7 @@ services:
       AMS_API_URL: "http://ams:3000" # existing Write API service (adjust name)
       AMS_QMD_URL: "http://ams:8181" # existing QMD daemon (adjust name)
     ports:
-      - "100.64.20.67:3111:3111" # publish on the tailnet interface ONLY
+      - "<tailnet-ip>:3111:3111" # publish on the tailnet interface ONLY
     healthcheck:
       # the image's built-in HEALTHCHECK probes the Write API, not this
       # service — this service needs its own stanza
@@ -467,7 +467,7 @@ Notes:
   marks the container unhealthy while the process keeps running. Treat
   unhealthy as "investigate upstreams", not "restart the service".
 - The port mapping publishes on the host's tailnet address
-  (`100.64.20.67` here — adjust to your host); nothing listens on the LAN or
+  (`<tailnet-ip>` here — adjust to your host); nothing listens on the LAN or
   public interfaces.
 
 > **Tailnet-only in phase 1.** The static token is defense in depth (see
@@ -531,7 +531,7 @@ share one service:
 
 | Population | Path | Credential |
 | --- | --- | --- |
-| Own agents (OpenCode, phase 1) | `http://100.64.20.67:3111/mcp` (tailnet, direct) | Static bearer token |
+| Own agents (OpenCode, phase 1) | `http://<tailnet-ip>:3111/mcp` (tailnet, direct) | Static bearer token |
 | Public connectors (phase 2) | `https://mcp.example.com/mcp` (edge → tunnel) | Auth0-issued JWT (RS256) |
 
 The upstream legs do not change: MCP → Write API / QMD stays plain HTTP on
@@ -808,7 +808,7 @@ what makes the edge rule below apply to the tunnel hostname.
 > **Network reachability.** `ams-mcp:3111` resolves only when cloudflared
 > shares the AMS compose network. If cloudflared runs elsewhere (host-level
 > or in its own stack), point the service URL at the phase-1 published
-> tailnet address instead: `http://100.64.20.67:3111`.
+> tailnet address instead: `http://<tailnet-ip>:3111`.
 
 ### Cloudflare edge rate limiting
 
@@ -910,7 +910,7 @@ JWKS fetch; verification never needs a deploy or restart.
 ### Troubleshooting (field-verified 2026-10-17)
 
 Every item below was hit and resolved during the live deployment of
-`https://ams.losfernandez.net/mcp` (tenant `dev-jz3zfzqovpyonc7i.eu.auth0.com`).
+`https://<public-domain>/mcp` (tenant `<auth0-domain>`).
 Auth0's tenant logs (Dashboard > Monitoring > Logs) name the exact failure —
 start there.
 
