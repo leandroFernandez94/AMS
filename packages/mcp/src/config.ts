@@ -8,9 +8,9 @@
  * shared adapter config so the retrieval client and this server can never
  * drift apart.
  *
- * HTTP-mode variables (`AMS_MCP_PORT`, `AMS_MCP_HOST`, `AMS_MCP_TOKEN`) are
- * read by the same resolver because the config is shared with the stdio
- * binary; only the HTTP entrypoint enforces the token.
+ * HTTP-mode variables (`AMS_MCP_PORT`, `AMS_MCP_HOST`, `AMS_MCP_TOKEN`, plus
+ * the optional OAuth triple) are read by the same resolver because the config
+ * is shared with the stdio binary; only the HTTP entrypoint enforces them.
  */
 import { DEFAULT_QMD_URL, loadQmdConfig, QMD_URL_ENV } from "@ams/shared";
 
@@ -30,6 +30,15 @@ export const MCP_HOST_ENV = "AMS_MCP_HOST";
 /** Environment variable name for the HTTP bearer token. */
 export const MCP_TOKEN_ENV = "AMS_MCP_TOKEN";
 
+/** Environment variable name for the OAuth authorization-server issuer URL. */
+export const MCP_OAUTH_ISSUER_ENV = "AMS_MCP_OAUTH_ISSUER";
+
+/** Environment variable name for the OAuth audience (Auth0 API identifier). */
+export const MCP_OAUTH_AUDIENCE_ENV = "AMS_MCP_OAUTH_AUDIENCE";
+
+/** Environment variable name for the public HTTPS base URL of this service. */
+export const MCP_PUBLIC_URL_ENV = "AMS_MCP_PUBLIC_URL";
+
 /** Default TCP port for the optional Streamable HTTP transport. */
 export const DEFAULT_MCP_PORT = 3111;
 
@@ -42,6 +51,31 @@ export class ConfigError extends Error {
     super(message);
     this.name = "ConfigError";
   }
+}
+
+/**
+ * Raw OAuth environment values as read (trimmed); the empty string means
+ * "unset". Kept unvalidated on the shared config so the stdio binary never
+ * breaks on HTTP-only variables — `resolveOAuthConfig` enforces the contract.
+ */
+export interface McpOAuthEnv {
+  issuer: string;
+  audience: string;
+  publicUrl: string;
+}
+
+/** Validated OAuth resource-server configuration (all three values present). */
+export interface McpOAuthConfig {
+  /**
+   * Auth0 issuer URL exactly as tokens will carry it in `iss` (jose compares
+   * the claim literally, so no normalization is applied). Trailing slash
+   * allowed — Auth0 issuers conventionally have one.
+   */
+  issuer: string;
+  /** Auth0 API identifier matched against the `aud` claim; not a URL. */
+  audience: string;
+  /** Public HTTPS base URL of this service, no trailing slash. */
+  publicUrl: string;
 }
 
 /** Resolved MCP server configuration. */
@@ -59,11 +93,67 @@ export interface McpConfig {
    * for stdio (config is shared); the HTTP entrypoint fails fast instead.
    */
   token: string;
+  /** Raw OAuth env values, empty string = unset. Validated for HTTP only. */
+  oauth: McpOAuthEnv;
 }
 
 /** Removes a trailing slash so callers can append paths safely. */
 function normalizeUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
+}
+
+/**
+ * Parses `raw` as an HTTPS URL without query or fragment.
+ *
+ * `raw` (not the parsed pathname) drives the trailing-slash check: `new URL`
+ * normalizes "https://host" to pathname "/", so only the raw string can
+ * distinguish an explicit trailing slash.
+ */
+function requireHttpsUrl(
+  raw: string,
+  envName: string,
+  options: { rejectTrailingSlash: boolean },
+): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ConfigError(`${envName} must be a valid https URL, got: ${raw}`);
+  }
+  if (url.protocol !== "https:") {
+    throw new ConfigError(`${envName} must use https, got: ${raw}`);
+  }
+  if (url.search || url.hash) {
+    throw new ConfigError(`${envName} must not include a query or fragment, got: ${raw}`);
+  }
+  if (options.rejectTrailingSlash && raw.endsWith("/")) {
+    throw new ConfigError(`${envName} must not have a trailing slash, got: ${raw}`);
+  }
+  return url;
+}
+
+/**
+ * Validates the all-or-nothing OAuth triple.
+ *
+ * Returns `null` when nothing is set (phase 1: static-token-only auth).
+ * Throws `ConfigError` when only some of the three variables are set — a
+ * half-configured resource server would silently reject every JWT.
+ */
+export function resolveOAuthConfig(raw: McpOAuthEnv): McpOAuthConfig | null {
+  const setCount = [raw.issuer, raw.audience, raw.publicUrl].filter((value) => value !== "").length;
+  if (setCount === 0) return null;
+  if (setCount < 3) {
+    throw new ConfigError(
+      `${MCP_OAUTH_ISSUER_ENV}, ${MCP_OAUTH_AUDIENCE_ENV} and ${MCP_PUBLIC_URL_ENV} ` +
+        `must be set together (found ${setCount} of 3)`,
+    );
+  }
+  requireHttpsUrl(raw.issuer, MCP_OAUTH_ISSUER_ENV, { rejectTrailingSlash: false });
+  if (!raw.audience) {
+    throw new ConfigError(`${MCP_OAUTH_AUDIENCE_ENV} must not be empty`);
+  }
+  requireHttpsUrl(raw.publicUrl, MCP_PUBLIC_URL_ENV, { rejectTrailingSlash: true });
+  return { issuer: raw.issuer, audience: raw.audience, publicUrl: raw.publicUrl };
 }
 
 /** Validates a numeric env override, falling back to a default (api/config style). */
@@ -93,5 +183,10 @@ export function getConfig(env: Record<string, string | undefined> = process.env)
     port: resolveNumber(env[MCP_PORT_ENV], MCP_PORT_ENV, DEFAULT_MCP_PORT),
     host: host || DEFAULT_MCP_HOST,
     token: token ?? "",
+    oauth: {
+      issuer: env[MCP_OAUTH_ISSUER_ENV]?.trim() ?? "",
+      audience: env[MCP_OAUTH_AUDIENCE_ENV]?.trim() ?? "",
+      publicUrl: env[MCP_PUBLIC_URL_ENV]?.trim() ?? "",
+    },
   };
 }
