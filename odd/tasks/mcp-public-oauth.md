@@ -161,6 +161,14 @@ docs describe the exact code. RDD: off (verified 2026-10-17, default).
 
 ## Progress log
 
+- 2026-10-17 (deploy): T4 operational phase. ams-mcp deployed on the
+  self-hosted stack (compose + /opt/.env with backups; replica PR
+  leandroFernandez94/home-server#9). Public endpoint
+  https://ams.losfernandez.net live: health/PRM/401-with-hint verified from
+  the internet; tunnel ingress rule order fixed (wildcard shadowed). Auth0
+  tenant dev-jz3zfzqovpyonc7i.eu.auth0.com; RFC 8414 tenant-root discovery
+  VERIFIED live (issuer exact with trailing slash, S256).
+
 - 2026-10-17: exploration complete. Issue + dependency #37 (merged) read;
   phase 1 code reviewed (`http-app.ts`, SDK 1.29.0 auth sources). Vendor
   docs verified: OAuth-only for both target connectors → CF Access rejected
@@ -193,9 +201,15 @@ docs describe the exact code. RDD: off (verified 2026-10-17, default).
 
 ## Next step
 
-- Push branch + open PR (single PR, size:exception approved) with `Closes #39`.
-- T4 after merge + deployment: user-assisted connector E2E (Claude app +
-  ChatGPT) against the deployed endpoint per the phase 2 runbook; record
-  outcomes in the issue. Operational steps outside the repo: compose env
-  (OAuth triple + rate limit), cloudflared public hostname + DNS, Auth0
-  tenant setup, CF edge rate-limiting rule — all documented in the runbook.
+- T4 (in progress, 2026-10-17): **Claude app connector E2E VERIFIED** against
+  the deployed endpoint — full OAuth flow (discovery → authorize → PKCE →
+  JWT) succeeded. Field findings recorded in the runbook troubleshooting
+  section: Auth0 new tenants map RFC 8707 `resource` → audience (API
+  identifier MUST be the public server URL; free-form identifier failed with
+  `Service not found`), new APIs require the Application Access toggle per
+  connector app, tunnel ingress is first-match-wins (wildcard shadowed the
+  specific rule; reordered), dashboard user-creation bug worked around via
+  Management API (M2M + create:users).
+- Remaining T4: ChatGPT connector E2E (same pattern; redirect URI from its
+  management page into the `AMS MCP — ChatGPT` callbacks), Cloudflare edge
+  rate-limiting rule, record final outcomes on issue #39.
