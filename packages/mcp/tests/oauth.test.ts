@@ -79,19 +79,28 @@ interface JwtOverrides {
   audience?: string;
   /** NumericDate (seconds); defaults to two minutes from now. */
   expiresAt?: number;
+  /** When true, the JWT carries no exp claim at all (must be rejected). */
+  omitExpiration?: boolean;
   key?: CryptoKey;
 }
 
 /** Signs a compact RS256 JWT with the trusted kid unless overridden. */
 async function signJwt(overrides: JwtOverrides = {}): Promise<string> {
   const { privateKey } = trustedKeys ?? (await generateKeyPair("RS256"));
-  return new SignJWT({})
+  let builder = new SignJWT({})
     .setProtectedHeader({ alg: "RS256", kid: TRUSTED_KID })
     .setIssuer(overrides.issuer ?? issuerUrl)
     .setAudience(overrides.audience ?? AUDIENCE)
-    .setIssuedAt()
-    .setExpirationTime(overrides.expiresAt ?? Math.floor(Date.now() / 1000) + 120)
-    .sign(overrides.key ?? privateKey);
+    .setIssuedAt();
+  if (!overrides.omitExpiration) {
+    builder = builder.setExpirationTime(overrides.expiresAt ?? Math.floor(Date.now() / 1000) + 120);
+  }
+  return builder.sign(overrides.key ?? privateKey);
+}
+
+/** Base64url-encodes a JSON value (for hand-crafting alg:none tokens). */
+function b64urlJson(value: unknown): string {
+  return btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // Shared fixture state: populated in beforeAll, torn down in afterAll.
@@ -288,6 +297,60 @@ describe("oauth resource server", () => {
     // resolves it and the signature check itself must fail.
     const jwt = await signJwt({ key: rogue.privateKey });
     await expectInvalidToken(`http://127.0.0.1:${getPort(oauthEntry)}`, jwt);
+  });
+
+  it("rejects a JWT without an exp claim (401)", async () => {
+    // jose only validates exp when present; requiredClaims must close that
+    // hole (a never-expiring token must never verify on a public endpoint).
+    const jwt = await signJwt({ omitExpiration: true });
+    await expectInvalidToken(`http://127.0.0.1:${getPort(oauthEntry)}`, jwt);
+  });
+
+  it("rejects an unsigned alg:none token (401)", async () => {
+    const payload = {
+      iss: issuerUrl,
+      aud: AUDIENCE,
+      exp: Math.floor(Date.now() / 1000) + 120,
+    };
+    const jwt = `${b64urlJson({ alg: "none", kid: TRUSTED_KID })}.${b64urlJson(payload)}.`;
+    await expectInvalidToken(`http://127.0.0.1:${getPort(oauthEntry)}`, jwt);
+  });
+
+  it("rejects an HS256 token keyed with the public JWK material (401)", async () => {
+    // Attack replication: the attacker HMACs with a secret derived from the
+    // public key. The RS256 pin plus the JWKS key class must both reject it.
+    const keys = trustedKeys ?? (await generateKeyPair("RS256"));
+    const publicJwk = await exportJWK(keys.publicKey);
+    const secret = new TextEncoder().encode(JSON.stringify(publicJwk));
+    const hmacKey = await crypto.subtle.importKey(
+      "raw",
+      secret,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const jwt = await new SignJWT({ iss: issuerUrl, aud: AUDIENCE })
+      .setProtectedHeader({ alg: "HS256", kid: TRUSTED_KID })
+      .setIssuedAt()
+      .setExpirationTime(Math.floor(Date.now() / 1000) + 120)
+      .sign(hmacKey);
+    await expectInvalidToken(`http://127.0.0.1:${getPort(oauthEntry)}`, jwt);
+  });
+
+  it("answers a charset-invalid token with 400 + resource_metadata hint", async () => {
+    // Hono rejects the charset before any verification; the RFC 9728 hint
+    // must still reach the client on this branch.
+    const response = await fetch(`http://127.0.0.1:${getPort(oauthEntry)}/mcp`, {
+      method: "POST",
+      headers: { Authorization: "Bearer bad:token" },
+      cache: "no-store",
+    });
+    expect(response.status).toBe(400);
+    const challenge = response.headers.get("www-authenticate") ?? "";
+    expect(challenge).toContain('error="invalid_request"');
+    expect(challenge).toContain(
+      `resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource/mcp"`,
+    );
   });
 
   it("rejects a request without an Authorization header (401 with resource_metadata)", async () => {

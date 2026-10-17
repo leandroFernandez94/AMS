@@ -124,6 +124,11 @@ function createMcpAuth(options: HttpAppOptions): ReturnType<typeof bearerAuth> {
           issuer: oauth.issuer,
           audience: oauth.audience,
           algorithms: ["RS256"],
+          // jose validates exp only when present; requiring it explicitly
+          // means a token without expiry can never verify. The AS stamps exp
+          // on every access token, but this endpoint faces the public
+          // internet — defense in depth against a repointed issuer.
+          requiredClaims: ["exp"],
           clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
         });
         return true;
@@ -136,6 +141,9 @@ function createMcpAuth(options: HttpAppOptions): ReturnType<typeof bearerAuth> {
     },
     noAuthenticationHeader: {
       wwwAuthenticateHeader: { realm: "", resource_metadata: resourceMetadata },
+    },
+    invalidAuthenticationHeader: {
+      wwwAuthenticateHeader: { error: "invalid_request", resource_metadata: resourceMetadata },
     },
   });
 }
