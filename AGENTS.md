@@ -7,17 +7,17 @@ Read this before writing code.
 
 AMS is an Agents Memory System: a shared-memory architecture for AI agents,
 Markdown-first. It is a **general-purpose note-taking system**, not an
-ADR-specific tool — the note contract is type-generic (see below). The current
-milestone is the **Tracer Bullet** — a minimal end-to-end loop
+ADR-specific tool — the note contract is type-generic (see below). The
+**Tracer Bullet** milestone — a minimal end-to-end loop
 (agent → MCP → Write API → Vault → QMD → agent reads back), tracked as GitHub
-issues `Spec 1`..`Spec 7`.
+issues `Spec 1`..`Spec 7` — is **complete**: the loop ships over stdio and
+Streamable HTTP and is covered end to end by the `pnpm tracer` suite.
 
 ## Language Policy (IMPORTANT)
 
 **All code, comments, identifiers, UI strings, documentation, commit messages
 and PR descriptions MUST be written in English.**
 
-This overrides the global server `AGENTS.md` rule that favors Spanish comments.
 Rationale: the repository is public and consumed by tooling (parsers, linters,
 search indexes) that work best with English. Spanish (or any other language)
 may appear only in:
@@ -49,9 +49,11 @@ packages/
 
 ```bash
 pnpm install              # install deps (respects lockfile)
+pnpm build                # tsc --build (compile all packages to dist/)
 pnpm typecheck            # tsc --build (all packages)
 pnpm test                 # vitest run
 pnpm test:watch           # vitest watch mode
+pnpm tracer               # e2e suite (precheck + vitest.tracer.config.ts)
 pnpm lint                 # biome lint .
 pnpm format               # biome format --write .
 pnpm check                # biome check . (lint + format, use before commit)
