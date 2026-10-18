@@ -440,7 +440,7 @@ services reached over the container network:
 ```yaml
 services:
   ams-mcp:
-    image: ghcr.io/leandrofernandez94/ams:latest
+    image: ghcr.io/<owner>/ams:latest
     command: node packages/mcp/dist/http.js
     environment:
       AMS_MCP_TOKEN: "${AMS_MCP_TOKEN:?set in .env}" # openssl rand -base64 32
