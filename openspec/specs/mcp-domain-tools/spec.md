@@ -2,19 +2,19 @@
 
 ## Purpose
 
-Semantic MCP tools that expose AMS write and retrieval surfaces to AI agents over stdio. Agents never touch the filesystem or QMD daemon directly: mutations flow through the Write API (Spec 3), reads through the QMD adapter (Spec 4).
+Semantic MCP tools that expose AMS write and retrieval surfaces to AI agents over stdio and Streamable HTTP. Agents never touch the filesystem or QMD daemon directly: mutations flow through the Write API (Spec 3), reads through the QMD adapter (Spec 4).
 
 ## Requirements
 
 ### Requirement: Tool Catalog
 
-The server SHALL expose exactly three tools — `record_note`, `search_memory`, `get_memory` — each with a stable name, a typed input schema, and a description explicit enough for an LLM to pick the right tool without examples.
+The server SHALL expose exactly six tools — `record_note`, `delete_note`, `list_types`, `list_tags`, `search_memory`, `get_memory` — each with a stable name, a typed input schema, and a description explicit enough for an LLM to pick the right tool without examples.
 
 #### Scenario: Client lists the catalog
 
 - GIVEN a connected MCP client
 - WHEN it calls `tools/list`
-- THEN the response contains exactly those three tools, each with a non-empty description and typed input schema
+- THEN the response contains exactly those six tools, each with a non-empty description and typed input schema
 
 ### Requirement: Typed Input Schemas
 
@@ -23,6 +23,9 @@ Each tool MUST reject malformed input before any upstream call.
 | Tool | Required | Optional |
 |------|----------|----------|
 | `record_note` | `title`, `type`, `body` (strings) | `topic_key`, `tags: string[]`, `date` |
+| `delete_note` | `file` (vault-relative note path, as shown in `search_memory` results) | — |
+| `list_types` | — | — |
+| `list_tags` | — | — |
 | `search_memory` | `query: string` | `rerank: boolean`, `limit: number`, `minScore: number` |
 | `get_memory` | `file: string` | — |
 
@@ -92,7 +95,7 @@ Upstream failures MUST surface as MCP results with `isError: true` and a human-r
 
 ### Requirement: Server Factory and Transport
 
-`createServer(deps?)` MUST register tools and return a server WITHOUT connecting a transport, so a stdio entry can connect `StdioServerTransport` and tests can drive the same factory via `InMemoryTransport`. Configuration MUST be resolvable from `AMS_API_URL` and `AMS_QMD_URL`. Deps (Write API base URL, `QmdClient`, `fetch`) SHALL be injectable. All logging MUST go to stderr; writing logs to stdout SHALL be a defect because it corrupts the JSON-RPC stream.
+`createServer(deps?)` MUST register tools and return a server WITHOUT connecting a transport, so a stdio entry can connect `StdioServerTransport` and tests can drive the same factory via `InMemoryTransport`. The same factory SHALL back the HTTP entrypoint (`ams-mcp-http`): a stateless Streamable HTTP server on `POST /mcp` (JSON responses, no sessions), gated by a static bearer token (`AMS_MCP_TOKEN`), with an optional OAuth 2.1 resource-server mode (RS256 + JWKS, RFC 9728 metadata at `/.well-known/oauth-protected-resource/mcp`, configured by the all-or-none `AMS_MCP_OAUTH_ISSUER`/`AMS_MCP_OAUTH_AUDIENCE`/`AMS_MCP_PUBLIC_URL` triple), per-client rate limiting (`AMS_MCP_RATE_LIMIT`, default 120 req/min, applied before auth), and an unauthenticated `GET /health` upstream probe. Configuration MUST be resolvable from `AMS_API_URL` and `AMS_QMD_URL`. Deps (Write API base URL, `QmdClient`, `fetch`) SHALL be injectable. All logging MUST go to stderr; writing logs to stdout SHALL be a defect because it corrupts the JSON-RPC stream.
 
 #### Scenario: Factory is transport-agnostic
 
@@ -105,6 +108,18 @@ Upstream failures MUST surface as MCP results with `isError: true` and a human-r
 - GIVEN the server is running over stdio
 - WHEN any tool is invoked
 - THEN only JSON-RPC frames are written to stdout
+
+#### Scenario: HTTP entrypoint rejects a missing token
+
+- GIVEN the HTTP entrypoint is running with `AMS_MCP_TOKEN` set
+- WHEN `POST /mcp` arrives without an `Authorization` header
+- THEN the server responds `401` with a `WWW-Authenticate` challenge and no tool is invoked
+
+#### Scenario: Health answers without auth
+
+- GIVEN the HTTP entrypoint is running
+- WHEN `GET /health` is requested with no credentials
+- THEN the server responds with an upstream reachability report (200 ok / 503 degraded)
 
 #### Scenario: In-memory tool call
 
