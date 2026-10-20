@@ -13,40 +13,24 @@ Related runbooks: [tracer-runbook.md](tracer-runbook.md) (end-to-end loop),
 
 ## Topology
 
-```mermaid
-flowchart TB
-    subgraph CLIENTS["🤖 Clients (AI agents)"]
-        OC["Agent on the API host<br/>stdio: packages/mcp/dist/bin.js"]
-        TA["Private-network agents<br/>static bearer token"]
-        PA["Public internet agents<br/>OAuth 2.1 JWT (RS256)"]
-    end
+AMS ships two deployment shapes. The components are the same; what changes is
+where the MCP server runs and how it is authenticated.
 
-    PA -->|"https://mcp.example.com/mcp"| EDGE["☁️ TLS edge<br/>(reverse proxy or tunnel — optional)"]
-    EDGE --> MCP
+### Local stdio deployment
 
-    subgraph RUNTIME["AMS runtime (one host — processes or containers)"]
-        MCP["📦 MCP server — Streamable HTTP :3111<br/>dual auth · 120 req/min · stateless POST /mcp"]
-        API["📦 Write API (Hono) :3000<br/>+ embedded IndexScheduler (cron */2)"]
-        QMD["📦 QMD daemon :8181<br/>hybrid lexical + vector search"]
-        IDX[("QMD index<br/>index.sqlite + embeddings")]
-        MCP -->|"record_note · delete_note<br/>list_types · list_tags"| API
-        MCP -->|"search_memory · get_memory<br/>JSON-RPC query/get"| QMD
-        API -->|"spawns CLI children<br/>qmd update + qmd embed"| IDX
-        QMD --- IDX
-    end
+![Local stdio deployment](assets/deployment-stdio.png)
 
-    OC -->|"AMS_API_URL=http://<api-host>:3000"| API
-    OC -->|"AMS_QMD_URL=http://<api-host>:8181"| QMD
-    TA -->|"http://<private-host>:3111/mcp"| MCP
+The MCP server runs as a child process on the agent's host — no
+authentication, because it is local — and points `AMS_API_URL` /
+`AMS_QMD_URL` at the vault host.
 
-    subgraph STORAGE["💾 Storage"]
-        VAULT[("/path/to/vault<br/>the .md notes — source of truth")]
-        QDATA[("/path/to/ams-data<br/>.qmd registry · embedding model<br/>+ index cache")]
-    end
-    API ---|"reads/writes .md"| VAULT
-    QMD --- VAULT
-    QMD --- QDATA
-```
+### Remote HTTP deployment
+
+![Remote HTTP deployment](assets/deployment-http.png)
+
+The MCP server runs on the vault host as a stateless Streamable HTTP service
+(`POST /mcp`) gated by a static bearer token and, optionally, an OAuth 2.1
+resource-server mode (RS256/JWKS).
 
 ## Write path (note → index)
 
