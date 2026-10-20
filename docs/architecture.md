@@ -1,13 +1,15 @@
 # AMS — Architecture
 
 AMS is a Markdown-first shared memory system for AI agents. This document
-describes the system as built: components, the write path, the read path, the
-note contract, the authentication model, configuration, and operational
-caveats. Deployment specifics live in [Example deployment](#example-deployment)
-(placeholder values only) and in
+describes the system as built: components, the note contract, the
+authentication model, configuration, and operational caveats. The full note
+anatomy and processing lifecycle (write, update, delete, locking, indexing)
+live in [notes-processing.md](notes-processing.md). Deployment specifics live
+in [Example deployment](#example-deployment) (placeholder values only) and in
 [remote-mcp-deployment.md](remote-mcp-deployment.md).
 
-Related runbooks: [e2e-runbook.md](e2e-runbook.md) (end-to-end loop),
+Related docs: [notes-processing.md](notes-processing.md) (note anatomy and
+lifecycle), [e2e-runbook.md](e2e-runbook.md) (end-to-end loop),
 [retrieval-runbook.md](retrieval-runbook.md) (QMD daemon ops),
 [quickstart.md](quickstart.md) (first run).
 
@@ -33,33 +35,6 @@ The MCP server runs on the vault host as a stateless Streamable HTTP service
 (`POST /mcp`) gated by a static bearer token and, optionally, an OAuth 2.1
 resource-server mode (RS256/JWKS).
 
-## Write path (note → index)
-
-```
-agent → record_note ──► Write API :3000
-                          1. Zod validates NoteInput (packages/shared)
-                          2. id = slug(title) → <type>s/<id>.md
-                          3. in-memory lock (path-scoped, TTL 5s, FIFO;
-                             old+new paths in sorted order for topic_key renames)
-                          4. serializeNote (frontmatter + body) → writes the vault
-                          5. marks <vault>/.ams/dirty.json  (delete → immediate tick)
-IndexScheduler (cron */2 * * * *, IN the API process — no separate daemon)
-                          6. drains dirty → execFile: qmd update + qmd embed
-                             (collection-scoped via AMS_QMD_COLLECTION when set)
-                          7. on success → clears dirty.json
-```
-
-## Read path (search)
-
-```
-agent → search_memory ──► QMD daemon :8181 (JSON-RPC, initialize handshake + session-id)
-                           hybrid lexical+vector, RRF fusion → hits with docid #abc123
-agent → get_memory(#abc123) ──► QMD get → full note body
-```
-
-Asymmetry to remember: `get_memory` needs the **docid** returned by
-`search_memory`; a vault-relative path does not resolve.
-
 ## Note contract (three axes)
 
 | Axis | Question | Mechanic |
@@ -67,6 +42,9 @@ Asymmetry to remember: `get_memory` needs the **docid** returned by
 | `type` | **WHERE** it lives | folder `<type>s/<id>.md` in the vault |
 | `topic_key` | **WHO** it is | upsert in place: same key → same note, rename leaves no orphans |
 | `tags` | **WHAT** it is about | semantic relations; discover vocabulary via `GET /tags` / `list_tags` |
+
+See [notes-processing.md](notes-processing.md) for the full anatomy of a note
+(frontmatter, slug rules, derived path) and its processing lifecycle.
 
 ## Write API routes
 
@@ -110,7 +88,7 @@ endpoint (`/.well-known/oauth-protected-resource/mcp`) are unauthenticated.
 | `AMS_LOCK_TTL_MS` | Write API | `5000` | write-lock TTL (ms) |
 | `AMS_INDEX_CRON` | Write API | `*/2 * * * *` | reindex schedule (node-cron) |
 | `AMS_INDEX_ENABLED` | Write API | `true` | indexing kill-switch |
-| `AMS_QMD_COLLECTION` | Write API | — | scope `qmd update`/`qmd embed` to one collection |
+| `AMS_QMD_COLLECTION` | Write API | — | scope `qmd embed` to one collection (`qmd update` re-scans all) |
 | `AMS_QMD_BIN` | Write API | `qmd` | path to the QMD CLI binary |
 | `AMS_API_URL` | MCP (both transports) | **required** | Write API base URL |
 | `AMS_QMD_URL` | MCP (both transports) | `http://localhost:8181` | QMD daemon base URL |

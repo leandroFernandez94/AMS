@@ -121,8 +121,10 @@ resource-server mode (RS256/JWKS) for public exposure.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — components, write/read
-  paths, note contract, authentication, configuration, caveats
+- [docs/architecture.md](docs/architecture.md) — components, note contract,
+  authentication, configuration, caveats
+- [docs/notes-processing.md](docs/notes-processing.md) — note anatomy and the
+  write/update/delete lifecycle, locking, indexing
 - [docs/quickstart.md](docs/quickstart.md) — clone to working loop,
   from source
 - [docs/e2e-runbook.md](docs/e2e-runbook.md) — end-to-end loop
