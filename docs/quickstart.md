@@ -138,7 +138,7 @@ For private-network and public OAuth deployments, see
 
 ```bash
 cd /path/to/ams
-pnpm tracer     # boots a temp vault + real QMD daemon, drives the full loop
+pnpm e2e       # boots a temp vault + real QMD daemon, drives the full loop
 ```
 
 ## Troubleshooting
@@ -150,6 +150,6 @@ pnpm tracer     # boots a temp vault + real QMD daemon, drives the full loop
 | QMD daemon unreachable | Check it is running and that `AMS_QMD_URL` matches its bound host/port |
 | `qmd` not on PATH | `npm i -g @tobilu/qmd` |
 
-More: [tracer-runbook.md](tracer-runbook.md) (loop reproduction and
+More: [e2e-runbook.md](e2e-runbook.md) (loop reproduction and
 troubleshooting), [retrieval-runbook.md](retrieval-runbook.md) (daemon
 operations), [architecture.md](architecture.md) (how the pieces fit).

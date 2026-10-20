@@ -1,13 +1,13 @@
-# Tracer Runbook
+# E2E Runbook
 
-End-to-end reproduction guide for the AMS Tracer Bullet loop:
+End-to-end reproduction guide for the AMS end-to-end loop:
 `record_note` (MCP) → Write API → note file on disk → reindex →
 `search_memory` (MCP) against a live QMD daemon.
 
 ## Quick path
 
 1. Install QMD: `npm i -g @tobilu/qmd` and confirm `qmd --version` ≥ 2.5.3.
-2. Run the automated suite: `pnpm tracer`.
+2. Run the automated suite: `pnpm e2e`.
 3. Or follow the manual curl/MCP recipes below to drive the same loop by hand.
 
 ## Prerequisites
@@ -15,8 +15,8 @@ End-to-end reproduction guide for the AMS Tracer Bullet loop:
 - **Node.js** ≥ 22 (enforced by `engines` in `package.json`).
 - **QMD CLI** installed globally: `npm i -g @tobilu/qmd`.
 - Verify the version: `qmd --version` should report ≥ `2.5.3`.
-- The suite expects `qmd` on `PATH`; if it is missing, `pnpm tracer` exits with:
-  `Missing prerequisite: 'qmd' is not on PATH — install with npm i -g @tobilu/qmd, see docs/tracer-runbook.md`.
+- The suite expects `qmd` on `PATH`; if it is missing, `pnpm e2e` exits with:
+  `Missing prerequisite: 'qmd' is not on PATH — install with npm i -g @tobilu/qmd, see docs/e2e-runbook.md`.
 
 ## First-run cost
 
@@ -26,13 +26,13 @@ The first time QMD embeds a note it downloads a local embedding model:
 - Full model set (embedding + query expansion + reranker): ~2 GB.
 - Models are cached in `~/.cache/qmd/models/` and reused across runs.
 
-Because of this download, the first `pnpm tracer` run can take several minutes.
+Because of this download, the first `pnpm e2e` run can take several minutes.
 Subsequent runs are much faster (seconds per note on CPU).
 
 ## Automated suite
 
 ```bash
-pnpm tracer
+pnpm e2e
 ```
 
 What it proves:
@@ -42,7 +42,7 @@ What it proves:
 - Asserts the note is written to disk, reindexed, and retrievable.
 - Asserts failure modes (lock contention, QMD down) and isolation (no global index pollution).
 
-The temporary vault lives under `os.tmpdir()` (`/tmp/ams-tracer-XXXXXX` on Linux) and is removed by the fixture teardown, whether the tests pass or fail.
+The temporary vault lives under `os.tmpdir()` (`/tmp/ams-e2e-XXXXXX` on Linux) and is removed by the fixture teardown, whether the tests pass or fail.
 
 ## Manual loop reproduction with curl
 
@@ -78,7 +78,7 @@ Record a note:
 ```bash
 curl -s -X POST http://localhost:3000/notes \
   -H "content-type: application/json" \
-  -d '{"title":"Manual Tracer","type":"note","body":"Proving the loop by hand."}'
+  -d '{"title":"Manual Loop","type":"note","body":"Proving the loop by hand."}'
 ```
 
 Reindex so the note becomes searchable:
@@ -103,7 +103,7 @@ curl -s -X POST http://localhost:8184/mcp \
   -H "mcp-session-id: $SESSION" \
   -d '{
     "jsonrpc":"2.0","id":1,"method":"tools/call",
-    "params":{"name":"query","arguments":{"searches":[{"type":"lex","query":"manual tracer"},{"type":"vec","query":"manual tracer"}],"rerank":false}}
+    "params":{"name":"query","arguments":{"searches":[{"type":"lex","query":"manual loop"},{"type":"vec","query":"manual loop"}],"rerank":false}}
   }'
 ```
 

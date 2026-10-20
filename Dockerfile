@@ -1,6 +1,6 @@
 # AMS server image — Write API + QMD retrieval daemon in one container.
 #
-# Runs the two server-side processes of the tracer bullet:
+# Runs the two server-side processes:
 #   1. QMD daemon  (hybrid search, MCP-over-HTTP on $QMD_PORT)
 #   2. Write API   (Hono HTTP server on $AMS_API_PORT)
 # The MCP stdio server is NOT run here — clients launch it on their own host
@@ -54,7 +54,7 @@ FROM node:22-slim
 
 # Toolchain:
 # - pnpm pinned to the version declared in package.json ("packageManager")
-# - qmd pinned to the release proven by the Spec 7 tracer suite (>= 2.5.3)
+# - qmd pinned to the release proven by the e2e suite (>= 2.5.3)
 # - socat bridges IPv4 -> IPv6 loopback for the QMD daemon: qmd 2.5.3
 #   accepts --host 0.0.0.0 but silently binds ::1 only (verified empirically),
 #   so it is unreachable over IPv4 (docker port publishing, 127.0.0.1 probes).
@@ -98,7 +98,7 @@ EXPOSE 3000 8181
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD wget -q -T 4 -t 1 -O /dev/null http://localhost:${AMS_API_PORT:-3000}/health || exit 1
 
-# Boot sequence (mirrors docs/tracer-runbook.md manual recipe):
+# Boot sequence (mirrors docs/e2e-runbook.md manual recipe):
 #   1. ensure the vault exists
 #   2. first boot only: qmd init + collection add in $QMD_PROJECT_DIR so
 #      `qmd update` spawned by the reindexer resolves the local .qmd registry

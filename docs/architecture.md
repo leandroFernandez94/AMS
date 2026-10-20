@@ -7,7 +7,7 @@ caveats. Deployment specifics live in [Example deployment](#example-deployment)
 (placeholder values only) and in
 [remote-mcp-deployment.md](remote-mcp-deployment.md).
 
-Related runbooks: [tracer-runbook.md](tracer-runbook.md) (end-to-end loop),
+Related runbooks: [e2e-runbook.md](e2e-runbook.md) (end-to-end loop),
 [retrieval-runbook.md](retrieval-runbook.md) (QMD daemon ops),
 [quickstart.md](quickstart.md) (first run).
 

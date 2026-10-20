@@ -1,12 +1,12 @@
-# E2E Tracer Suite Specification
+# E2E Suite Specification
 
 ## Purpose
 
-An isolated end-to-end harness proving the Tracer Bullet loop — MCP `record_note` → Write API → note file in the vault → reindex → MCP `search_memory` against a live QMD daemon — plus its failure modes, without touching global QMD state or the default test suites.
+An isolated end-to-end harness proving the end-to-end loop — MCP `record_note` → Write API → note file in the vault → reindex → MCP `search_memory` against a live QMD daemon — plus its failure modes, without touching global QMD state or the default test suites.
 
 ## Requirements
 
-### Requirement: Tracer Loop Proof
+### Requirement: End-to-End Loop Proof
 
 The suite MUST prove the full chain: MCP `record_note` → Write API → note file on disk in the vault → `POST /admin/reindex` returns ok → `search_memory` returns the just-written note. The MCP server SHALL be driven in-process; retrieval SHALL hit a live QMD daemon.
 
@@ -75,31 +75,31 @@ The suite MUST assert each failure mode at least once:
 - WHEN `search_memory` is called
 - THEN the result is an error containing `QMD retrieval unavailable` and the MCP server keeps running
 
-### Requirement: Tracer Entrypoint
+### Requirement: E2E Entrypoint
 
-The root `pnpm tracer` script MUST run the suite via a dedicated vitest config and MUST fail fast with a clear message when `qmd` is not on PATH. The default `pnpm test`/CI run MUST NOT collect the suite — separate config/include, not skip logic. The suite MUST resolve workspace imports; the alias strategy is a design decision.
+The root `pnpm e2e` script MUST run the suite via a dedicated vitest config and MUST fail fast with a clear message when `qmd` is not on PATH. The default `pnpm test`/CI run MUST NOT collect the suite — separate config/include, not skip logic. The suite MUST resolve workspace imports; the alias strategy is a design decision.
 
-#### Scenario: Tracer run on a prepared machine
+#### Scenario: E2E run on a prepared machine
 
 - GIVEN a clean clone with Node ≥ 22 and QMD on PATH
-- WHEN `pnpm tracer` runs
+- WHEN `pnpm e2e` runs
 - THEN the E2E suite executes and passes
 
 #### Scenario: Missing qmd binary
 
 - GIVEN `qmd` is not on PATH
-- WHEN `pnpm tracer` runs
+- WHEN `pnpm e2e` runs
 - THEN it exits before running tests with a message naming the missing prerequisite
 
 #### Scenario: Default suite untouched
 
 - GIVEN CI runs plain `pnpm test` without QMD
 - WHEN the default suite runs
-- THEN no tracer E2E file is collected and the run passes as before
+- THEN no e2e file is collected and the run passes as before
 
-### Requirement: Tracer Runbook
+### Requirement: E2E Runbook
 
-`docs/tracer-runbook.md` MUST let a human reproduce the loop manually with curl against the Write API and an MCP client for the tools, and MUST document the first-run embedding-model download.
+`docs/e2e-runbook.md` MUST let a human reproduce the loop manually with curl against the Write API and an MCP client for the tools, and MUST document the first-run embedding-model download.
 
 #### Scenario: Manual reproduction
 

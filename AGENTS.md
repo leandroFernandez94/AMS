@@ -7,11 +7,9 @@ Read this before writing code.
 
 AMS is an Agents Memory System: a shared-memory architecture for AI agents,
 Markdown-first. It is a **general-purpose note-taking system**, not an
-ADR-specific tool — the note contract is type-generic (see below). The
-**Tracer Bullet** milestone — a minimal end-to-end loop
-(agent → MCP → Write API → Vault → QMD → agent reads back), tracked as GitHub
-issues `Spec 1`..`Spec 7` — is **complete**: the loop ships over stdio and
-Streamable HTTP and is covered end to end by the `pnpm tracer` suite.
+ADR-specific tool — the note contract is type-generic (see below). The loop
+(agent → MCP → Write API → Vault → QMD → agent reads back) ships over stdio
+and Streamable HTTP and is covered end to end by the `pnpm e2e` suite.
 
 ## Language Policy (IMPORTANT)
 
@@ -53,7 +51,7 @@ pnpm build                # tsc --build (compile all packages to dist/)
 pnpm typecheck            # tsc --build (all packages)
 pnpm test                 # vitest run
 pnpm test:watch           # vitest watch mode
-pnpm tracer               # e2e suite (precheck + vitest.tracer.config.ts)
+pnpm e2e                  # e2e suite (precheck + vitest.e2e.config.ts)
 pnpm lint                 # biome lint .
 pnpm format               # biome format --write .
 pnpm check                # biome check . (lint + format, use before commit)
@@ -68,8 +66,8 @@ Always run `pnpm typecheck && pnpm test && pnpm check` before committing.
 - **Types first**: prefer `import type` for type-only imports.
 - **No comments without purpose**: when you do comment, write WHY, not WHAT.
   Keep comments in English (see Language Policy).
-- **Simplicity over speculation**: do not add abstractions the tracer bullet
-  does not yet justify (see the bootstrap notes in Spec 1).
+- **Simplicity over speculation**: do not add abstractions the current scope
+  does not justify.
 - **Notes are type-generic**: the base `Note` in `packages/shared` carries a
   `type` field (decision, learning, pattern, note, ...) and a free-form
   markdown body. The parser does NOT enforce any H2 sections. Per-type

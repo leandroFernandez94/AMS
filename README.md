@@ -10,7 +10,7 @@ with your data in hand.
 
 ![AMS at a glance](docs/assets/overview.png)
 
-The tracer-bullet milestone is complete: six MCP domain tools over stdio and
+AMS is live end to end: six MCP domain tools over stdio and
 Streamable HTTP, ~290 automated tests, and a CI-published Docker image.
 
 ## Quick start (Docker)
@@ -117,7 +117,7 @@ resource-server mode (RS256/JWKS) for public exposure.
   paths, note contract, authentication, configuration, caveats
 - [docs/quickstart.md](docs/quickstart.md) — clone to working loop,
   from source
-- [docs/tracer-runbook.md](docs/tracer-runbook.md) — end-to-end loop
+- [docs/e2e-runbook.md](docs/e2e-runbook.md) — end-to-end loop
   reproduction and troubleshooting
 - [docs/retrieval-runbook.md](docs/retrieval-runbook.md) — QMD daemon
   operations
