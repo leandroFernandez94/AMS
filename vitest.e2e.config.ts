@@ -1,9 +1,9 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * Dedicated Vitest config for the E2E tracer suite.
+ * Dedicated Vitest config for the E2E suite.
  *
- * Keeps the tracer's failure domain separate from the default `pnpm test` run:
+ * Keeps its failure domain separate from the default `pnpm test` run:
  * `e2e/` is outside the root config's include glob, so CI never collects these
  * files. Aliases resolve workspace packages to their TypeScript source so the
  * suite runs without a prior build step.

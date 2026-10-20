@@ -1,7 +1,7 @@
 /**
  * AMS shared package — cross-package types and schemas.
  *
- * Core data contract of the tracer bullet. Defines the generic note
+ * Core data contract of AMS. Defines the generic note
  * type and its (de)serialization helpers consumed by the Write API,
  * MCP and the indexing layer.
  */

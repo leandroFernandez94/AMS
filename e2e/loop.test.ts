@@ -8,18 +8,18 @@ import { parseNote } from "@ams/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertNoSurvivors,
+  createE2eFixture,
   createIsolationCanary,
-  createTracerFixture,
   freePort,
   killProcessTree,
   startQmdDaemon,
 } from "./fixtures/vault.js";
 
 describe("happy-path loop", () => {
-  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+  let fx: Awaited<ReturnType<typeof createE2eFixture>>;
 
   beforeAll(async () => {
-    fx = await createTracerFixture();
+    fx = await createE2eFixture();
   }, 60_000);
 
   afterAll(async () => {
@@ -30,9 +30,9 @@ describe("happy-path loop", () => {
     const result = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Bullet Verification",
+        title: "End-to-End Verification",
         type: "note",
-        body: "Tracer bullet end-to-end verification against a live QMD daemon.",
+        body: "End-to-end verification against a live QMD daemon.",
       },
     });
 
@@ -44,9 +44,9 @@ describe("happy-path loop", () => {
     const result = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Bullet Persistence",
+        title: "End-to-End Persistence",
         type: "note",
-        body: "Tracer bullet persistence verification against a live QMD daemon.",
+        body: "End-to-end persistence verification against a live QMD daemon.",
       },
     });
 
@@ -59,17 +59,17 @@ describe("happy-path loop", () => {
     expect(existsSync(absPath)).toBe(true);
 
     const note = parseNote(await readFile(absPath, "utf8"));
-    expect(note.frontmatter.title).toBe("Tracer Bullet Persistence");
-    expect(note.body).toContain("Tracer bullet persistence verification");
+    expect(note.frontmatter.title).toBe("End-to-End Persistence");
+    expect(note.body).toContain("End-to-end persistence verification");
   });
 
   it("reindexes and finds the note via search_memory", async () => {
     const recordResult = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Bullet Retrieval",
+        title: "End-to-End Retrieval",
         type: "note",
-        body: "Tracer bullet retrieval verification against a live QMD daemon.",
+        body: "End-to-end retrieval verification against a live QMD daemon.",
       },
     });
     const relPath = (
@@ -82,7 +82,7 @@ describe("happy-path loop", () => {
 
     const searchResult = await fx.mcp.callTool({
       name: "search_memory",
-      arguments: { query: "tracer bullet retrieval" },
+      arguments: { query: "end-to-end retrieval" },
     });
 
     expect(searchResult.isError).toBeFalsy();
@@ -92,10 +92,10 @@ describe("happy-path loop", () => {
 });
 
 describe("conflict and resolution", () => {
-  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+  let fx: Awaited<ReturnType<typeof createE2eFixture>>;
 
   beforeAll(async () => {
-    fx = await createTracerFixture();
+    fx = await createE2eFixture();
   }, 60_000);
 
   afterAll(async () => {
@@ -106,7 +106,7 @@ describe("conflict and resolution", () => {
     const first = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Collision Note",
+        title: "E2E Collision Note",
         type: "note",
         body: "Original collision body.",
       },
@@ -118,7 +118,7 @@ describe("conflict and resolution", () => {
     const second = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Collision Note",
+        title: "E2E Collision Note",
         type: "note",
         body: "Replacement body.",
       },
@@ -141,7 +141,7 @@ describe("conflict and resolution", () => {
     await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Resolution Note",
+        title: "E2E Resolution Note",
         type: "note",
         body: "First body.",
       },
@@ -150,7 +150,7 @@ describe("conflict and resolution", () => {
     const result = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Resolution Note",
+        title: "E2E Resolution Note",
         type: "note",
         body: "Second body.",
         overwrite: true,
@@ -170,10 +170,10 @@ describe("conflict and resolution", () => {
     const first = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Topic Flow",
+        title: "E2E Topic Flow",
         type: "note",
         body: "Topic flow original.",
-        topic_key: "tracer/topic-flow",
+        topic_key: "e2e/topic-flow",
       },
     });
     expect(first.isError).toBeFalsy();
@@ -181,25 +181,25 @@ describe("conflict and resolution", () => {
     const second = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Topic Flow Renamed",
+        title: "E2E Topic Flow Renamed",
         type: "note",
         body: "Topic flow renamed.",
-        topic_key: "tracer/topic-flow",
+        topic_key: "e2e/topic-flow",
       },
     });
 
     expect(second.isError).toBeFalsy();
     expect(second.content[0]?.text).toContain(
-      "Note updated: tracer-topic-flow-renamed at notes/tracer-topic-flow-renamed.md " +
-        "(moved from notes/tracer-topic-flow.md)",
+      "Note updated: e2e-topic-flow-renamed at notes/e2e-topic-flow-renamed.md " +
+        "(moved from notes/e2e-topic-flow.md)",
     );
 
     // File moved: old path gone, new path present and carrying the key.
-    expect(existsSync(join(fx.vaultPath, "notes/tracer-topic-flow.md"))).toBe(false);
+    expect(existsSync(join(fx.vaultPath, "notes/e2e-topic-flow.md"))).toBe(false);
     const note = parseNote(
-      await readFile(join(fx.vaultPath, "notes/tracer-topic-flow-renamed.md"), "utf8"),
+      await readFile(join(fx.vaultPath, "notes/e2e-topic-flow-renamed.md"), "utf8"),
     );
-    expect(note.frontmatter.topic_key).toBe("tracer/topic-flow");
+    expect(note.frontmatter.topic_key).toBe("e2e/topic-flow");
     expect(note.body).toBe("Topic flow renamed.");
 
     // After reindexing, search finds the renamed note and the stale entry
@@ -209,24 +209,24 @@ describe("conflict and resolution", () => {
 
     const searchResult = await fx.mcp.callTool({
       name: "search_memory",
-      arguments: { query: "tracer topic flow renamed" },
+      arguments: { query: "e2e topic flow renamed" },
     });
     expect(searchResult.isError).toBeFalsy();
-    expect(searchResult.content[0]?.text).toContain("notes/tracer-topic-flow-renamed.md");
+    expect(searchResult.content[0]?.text).toContain("notes/e2e-topic-flow-renamed.md");
 
     const staleResult = await fx.mcp.callTool({
       name: "search_memory",
       arguments: { query: "topic flow original" },
     });
     expect(staleResult.isError).toBeFalsy();
-    expect(staleResult.content[0]?.text).not.toContain("notes/tracer-topic-flow.md");
+    expect(staleResult.content[0]?.text).not.toContain("notes/e2e-topic-flow.md");
   });
 
   it("deletes a note via delete_note and drops the stale index entry", async () => {
     const record = await fx.mcp.callTool({
       name: "record_note",
       arguments: {
-        title: "Tracer Delete Flow",
+        title: "E2E Delete Flow",
         type: "note",
         body: "Delete flow body.",
       },
@@ -238,7 +238,7 @@ describe("conflict and resolution", () => {
     await fx.reindex();
     const before = await fx.mcp.callTool({
       name: "search_memory",
-      arguments: { query: "tracer delete flow" },
+      arguments: { query: "e2e delete flow" },
     });
     expect(before.isError).toBeFalsy();
     expect(before.content[0]?.text).toContain(relPath);
@@ -259,7 +259,7 @@ describe("conflict and resolution", () => {
       await fx.reindex();
       const after = await fx.mcp.callTool({
         name: "search_memory",
-        arguments: { query: "tracer delete flow" },
+        arguments: { query: "e2e delete flow" },
       });
       expect(after.isError).toBeFalsy();
       stale = (after.content[0]?.text as string).includes(relPath);
@@ -269,10 +269,10 @@ describe("conflict and resolution", () => {
 });
 
 describe("lifecycle and readiness", () => {
-  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+  let fx: Awaited<ReturnType<typeof createE2eFixture>>;
 
   beforeAll(async () => {
-    fx = await createTracerFixture();
+    fx = await createE2eFixture();
   }, 60_000);
 
   afterAll(async () => {
@@ -288,7 +288,7 @@ describe("lifecycle and readiness", () => {
   });
 
   it("retries daemon boot when the probed port is already taken", async () => {
-    const root = await mkdtemp(join(tmpdir(), "ams-tracer-port-"));
+    const root = await mkdtemp(join(tmpdir(), "ams-e2e-port-"));
     const occupied = await freePort();
     const occupant = createServer();
     await new Promise<void>((resolve, reject) => {
@@ -319,12 +319,12 @@ describe("lifecycle and readiness", () => {
 });
 
 describe("isolation", () => {
-  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+  let fx: Awaited<ReturnType<typeof createE2eFixture>>;
   let canary: ReturnType<typeof createIsolationCanary>;
 
   beforeAll(async () => {
     canary = createIsolationCanary();
-    fx = await createTracerFixture();
+    fx = await createE2eFixture();
   }, 60_000);
 
   afterAll(async () => {

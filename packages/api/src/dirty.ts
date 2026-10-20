@@ -2,7 +2,7 @@
  * Dirty-flag store — the signal the indexer (Spec 5) consumes to know which
  * notes changed and must be re-indexed.
  *
- * For the tracer bullet this is a single JSON file under `<vault>/.ams/dirty.json`
+ * Currently this is a single JSON file under `<vault>/.ams/dirty.json`
  * mapping a note's relative path to the timestamp it was marked. The store is
  * intentionally simple: it is NOT a query index by itself (QMD is). Its only
  * job is to record "this path changed, please re-index".

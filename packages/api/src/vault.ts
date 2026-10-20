@@ -86,7 +86,7 @@ export class Vault {
    * sorted path order and the first match wins.
    *
    * Tradeoff: a linear scan per topic-key write is O(vault size). At
-   * tracer-bullet scale (hundreds of notes) that is fine; replace with an
+   * current scale (hundreds of notes) that is fine; replace with an
    * index only when the vault grows enough for the scan to matter.
    */
   async findByTopicKey(topicKey: string): Promise<TopicKeyMatch | null> {
@@ -234,7 +234,7 @@ export class Vault {
   private async writeAtomic(absPath: string, content: string): Promise<void> {
     // Node's writeFile with the default flag truncates+creates, which gives us
     // the overwrite semantics we want. The OS page cache is the durability
-    // level for the tracer bullet; fsync is out of scope until needed.
+    // level for now; fsync is out of scope until needed.
     await writeFile(absPath, content, "utf8");
   }
 }

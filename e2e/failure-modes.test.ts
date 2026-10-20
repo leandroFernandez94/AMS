@@ -6,13 +6,13 @@ import { createServer } from "@ams/mcp";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTracerFixture, freePort } from "./fixtures/vault.js";
+import { createE2eFixture, freePort } from "./fixtures/vault.js";
 
 describe("lock contention", () => {
-  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+  let fx: Awaited<ReturnType<typeof createE2eFixture>>;
 
   beforeAll(async () => {
-    fx = await createTracerFixture();
+    fx = await createE2eFixture();
   }, 60_000);
 
   afterAll(async () => {
@@ -56,10 +56,10 @@ describe("lock contention", () => {
 });
 
 describe("qmd down", () => {
-  let fx: Awaited<ReturnType<typeof createTracerFixture>>;
+  let fx: Awaited<ReturnType<typeof createE2eFixture>>;
 
   beforeAll(async () => {
-    fx = await createTracerFixture();
+    fx = await createE2eFixture();
   }, 60_000);
 
   afterAll(async () => {
@@ -71,7 +71,7 @@ describe("qmd down", () => {
     const deadQmdClient = new QmdClient({ url: `http://localhost:${deadPort}` });
     const server = createServer({ apiUrl: fx.apiUrl, qmdClient: deadQmdClient });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "ams-tracer-dead", version: "0.0.0" });
+    const client = new Client({ name: "ams-e2e-dead", version: "0.0.0" });
     await server.connect(serverTransport);
     await client.connect(clientTransport);
 
