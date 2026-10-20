@@ -25,6 +25,13 @@
   svg .env        { font-size: 12.5px; fill: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   svg .flow       { font-size: 12px; fill: #475569; }
   svg .ann        { font-size: 11px; fill: #94a3b8; font-style: italic; }
+  /* White halo so edge labels can sit on top of their own lines cleanly. */
+  svg .flow, svg .ann {
+    paint-order: stroke;
+    stroke: #ffffff;
+    stroke-width: 5px;
+    stroke-linejoin: round;
+  }
   svg .badge-rect { fill: #e0e7ff; stroke: #6366f1; stroke-width: 1; }
   svg .badge-txt  { font-size: 11px; fill: #4338ca; font-weight: 600; }
 </style>
@@ -52,7 +59,7 @@
     <rect x="110" y="260" width="260" height="150" rx="8" class="box-ams"/>
     <rect x="288" y="272" width="60" height="24" rx="12" class="badge-rect"/>
     <text x="318" y="288" text-anchor="middle" class="badge-txt">stdio</text>
-    <text x="230" y="304" text-anchor="middle" class="lbl">AMS MCP server</text>
+    <text x="240" y="308" text-anchor="middle" class="lbl">AMS MCP server</text>
     <text x="140" y="332" class="env">AMS_API_URL</text>
     <text x="140" y="352" class="env">AMS_QMD_URL</text>
     <text x="140" y="390" class="sub" font-style="italic">no auth — local process</text>

@@ -29,6 +29,13 @@
   svg .sub        { font-size: 11.5px; fill: #64748b; }
   svg .flow       { font-size: 12px;  fill: #475569; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   svg .ann        { font-size: 11px;  fill: #94a3b8; font-style: italic; }
+  /* White halo so edge labels can sit on top of their own lines cleanly. */
+  svg .flow, svg .ann {
+    paint-order: stroke;
+    stroke: #ffffff;
+    stroke-width: 5px;
+    stroke-linejoin: round;
+  }
 </style>
 </head>
 <body>
