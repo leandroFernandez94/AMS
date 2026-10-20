@@ -1,131 +1,135 @@
-# Agents Memory System (AMS)
+# AMS — Agents Memory System
 
-AMS gives AI agents a durable, shared memory built on plain Markdown. An agent
-writes a note through domain tools, the note lands as a `.md` file in a vault
-you own, a local hybrid search index makes it retrievable, and the agent reads
-it back later — the whole loop works end to end today:
+AMS gives AI agents a durable, shared memory built on plain Markdown files.
+An agent records what matters through a small set of MCP tools; every note
+lands as a `.md` file in a vault **you own**; a local hybrid search index
+makes those notes retrievable; and any agent — in the same session or a
+future one — reads them back. Because the memory is just files, there is no
+lock-in: read them with anything, back them up with anything, leave anytime
+with your data in hand.
 
-```
-agent → MCP tools → Write API → Markdown vault → QMD index → agent reads back
-```
+![AMS at a glance](docs/assets/overview.png)
 
-## Status
+The tracer-bullet milestone is complete: six MCP domain tools over stdio and
+Streamable HTTP, ~290 automated tests, and a CI-published Docker image.
 
-The tracer-bullet milestone is **complete**: the minimal end-to-end loop
-(agent → MCP → Write API → vault → QMD → agent reads back, tracked as
-GitHub issues `Spec 1`..`Spec 7`) is implemented and verified.
+## Quick start (Docker)
 
-- Six MCP domain tools: `record_note`, `delete_note`, `list_types`,
-  `list_tags`, `search_memory`, `get_memory`.
-- Two transports: stdio (every MCP client) and Streamable HTTP with static
-  bearer auth plus an optional OAuth 2.1 resource server (RS256/JWKS,
-  RFC 9728 metadata).
-- ~280 automated test cases across 25 files (`pnpm test`, plus the end-to-end
-  suite via `pnpm tracer`).
-- CI runs lint, typecheck and tests (Node 22), scans for secrets, and
-  publishes a Docker image to ghcr.io.
+The fastest way to try AMS against a local vault is the published image,
+[`ghcr.io/leandrofernandez94/ams:latest`](https://github.com/leandroFernandez94/AMS/pkgs/container/ams).
+Save this as `compose.yaml` and run `docker compose up -d`:
 
-## How it works
+```yaml
+services:
+  ams:
+    image: ghcr.io/leandrofernandez94/ams:latest
+    ports:
+      - "3000:3000"   # Write API
+      - "8181:8181"   # QMD search daemon
+    volumes:
+      - ams-data:/data
+    restart: unless-stopped
 
-```mermaid
-flowchart LR
-    subgraph AGENTS["AI agents"]
-        STDIO["MCP client (stdio)"]
-        HTTP["MCP client (Streamable HTTP)"]
-    end
-    MCP["MCP server<br/>six domain tools"]
-    API["Write API (Hono)<br/>+ embedded IndexScheduler"]
-    VAULT[("Markdown vault<br/>&lt;type&gt;s/&lt;id&gt;.md")]
-    QMD["QMD daemon<br/>hybrid lexical + vector"]
-    IDX[("QMD index<br/>sqlite + embeddings")]
+  ams-mcp:
+    image: ghcr.io/leandrofernandez94/ams:latest
+    command: node packages/mcp/dist/http.js
+    environment:
+      AMS_MCP_TOKEN: "change-me"   # openssl rand -base64 32
+      AMS_MCP_HOST: "0.0.0.0"
+      AMS_API_URL: "http://ams:3000"
+      AMS_QMD_URL: "http://ams:8181"
+    ports:
+      - "3111:3111"   # MCP Streamable HTTP
+    restart: unless-stopped
 
-    STDIO --> MCP
-    HTTP --> MCP
-    MCP -->|"record_note · delete_note<br/>list_types · list_tags"| API
-    API -->|"validated writes, path-scoped locks"| VAULT
-    API -->|"cron */2 → qmd update + qmd embed"| IDX
-    QMD --- IDX
-    QMD --- VAULT
-    MCP -->|"search_memory · get_memory"| QMD
+volumes:
+  ams-data:
 ```
 
-- **Writes** go through MCP domain tools → the Write API, which validates
-  input, derives a slug path (`<type>s/<id>.md`), takes a path-scoped lock,
-  and writes the note. An embedded scheduler reindexes the vault every two
-  minutes by shelling out to the `qmd` CLI.
-- **Reads** go through `search_memory` / `get_memory` → a QMD daemon (hybrid
-  lexical + vector search, RRF fusion) that indexes the same vault. AMS never
-  builds its own retrieval index — see the
-  [Retrieval Runbook](./docs/retrieval-runbook.md).
+On first boot the `ams` container creates the vault, initializes the QMD
+registry and registers the vault as a collection — no manual setup. The first
+indexing cycle downloads a ~300MB embedding model (one time only; it stays
+cached in the `ams-data` volume).
 
-### Packages
+Smoke test the loop:
+
+```bash
+curl http://localhost:3000/health        # {"status":"ok"}
+```
+
+Then point any MCP-capable client at `http://localhost:3111/mcp` with header
+`Authorization: Bearer change-me` and run the loop:
+`record_note` → force a reindex with
+`curl -X POST http://localhost:3000/admin/reindex` (or wait ~2 minutes for
+the scheduler) → `search_memory`.
+
+### Agents on your own machine (stdio, no token)
+
+The `ams` container does not run the stdio server — each local agent launches
+it next to itself. Clone and build once, then add this to any MCP client
+config:
+
+```json
+{
+  "ams": {
+    "command": "node",
+    "args": ["/path/to/ams/packages/mcp/dist/bin.js"],
+    "environment": {
+      "AMS_API_URL": "http://<docker-host>:3000",
+      "AMS_QMD_URL": "http://<docker-host>:8181"
+    }
+  }
+}
+```
+
+For the from-source walkthrough (no Docker) see
+[docs/quickstart.md](docs/quickstart.md); for network exposure and public
+OAuth deployments see
+[docs/remote-mcp-deployment.md](docs/remote-mcp-deployment.md).
+
+## How AMS is organized
 
 | Package | What it is |
 |---|---|
-| [`@ams/shared`](./packages/shared) | Cross-package types and schemas — the type-generic note contract |
-| [`@ams/api`](./packages/api) | Write API (Hono): validated note writes, path-scoped locks, embedded index scheduler |
-| [`@ams/mcp`](./packages/mcp) | MCP server with the six domain tools, over stdio (`ams-mcp`) and Streamable HTTP (`ams-mcp-http`) |
+| [`@ams/shared`](packages/shared) | Cross-package types and schemas — the note contract |
+| [`@ams/api`](packages/api) | Write API: validated note writes, locks, embedded index scheduler |
+| [`@ams/mcp`](packages/mcp) | MCP server with the six domain tools, over stdio and HTTP |
 
-## Quick start
+### Local stdio deployment
 
-1. Install QMD ≥ 2.5.3: `npm i -g @tobilu/qmd`
-2. Clone and build: `pnpm install && pnpm build`
-3. Create a vault and register it with QMD (`qmd init`,
-   `qmd collection add <vault> --name ams`)
-4. Start the QMD daemon (`qmd mcp --http`) and the Write API
-   (`AMS_VAULT_PATH=<vault> node packages/api/dist/server.js`)
-5. Connect an MCP client (stdio or HTTP) and run the loop:
-   `record_note` → reindex → `search_memory` → `get_memory`
-6. Verify with the e2e suite: `pnpm tracer`
+![Local stdio deployment](docs/assets/deployment-stdio.png)
 
-Full walkthrough with client configuration snippets:
-[docs/quickstart.md](./docs/quickstart.md).
+The MCP server runs as a child process on the agent's host — no
+authentication, because it is local — and points `AMS_API_URL` /
+`AMS_QMD_URL` at the machine hosting the vault.
 
-## Core design principles
+### Remote HTTP deployment
 
-- **Markdown-first durability**: data remains usable without a proprietary
-  backend.
-- **Read/Write separation**: retrieval and persistence are independent
-  concerns.
-- **Semantic writes**: agents call domain tools (`record_note`), not raw file
-  writes.
-- **Conflict safety**: prefer append-only operations; use structured upserts
-  (`topic_key`) for canonical notes.
+![Remote HTTP deployment](docs/assets/deployment-http.png)
 
-## Security and portability
-
-This repository is public. All examples and code must follow these
-constraints:
-
-- no secrets or credentials in git history
-- no host-specific absolute paths (for example `/home/<user>/...`)
-- no assumptions about a single machine layout
-- all runtime configuration via environment variables
-
-See [SECURITY.md](./SECURITY.md) for disclosure and contributor rules.
+The MCP server runs on the vault host as a stateless Streamable HTTP service
+(`POST /mcp`) gated by a static bearer token and, optionally, an OAuth 2.1
+resource-server mode (RS256/JWKS) for public exposure.
 
 ## Documentation
 
-- [docs/README.md](./docs/README.md) — index of all guides
-- [docs/architecture.md](./docs/architecture.md) — components, write/read
-  paths, authentication, operational caveats
-- [docs/quickstart.md](./docs/quickstart.md) — clone → working loop
-- [docs/tracer-runbook.md](./docs/tracer-runbook.md) — end-to-end loop
+- [docs/architecture.md](docs/architecture.md) — components, write/read
+  paths, note contract, authentication, configuration, caveats
+- [docs/quickstart.md](docs/quickstart.md) — clone to working loop,
+  from source
+- [docs/tracer-runbook.md](docs/tracer-runbook.md) — end-to-end loop
   reproduction and troubleshooting
-- [docs/retrieval-runbook.md](./docs/retrieval-runbook.md) — QMD daemon
+- [docs/retrieval-runbook.md](docs/retrieval-runbook.md) — QMD daemon
   operations
-- [docs/remote-mcp-deployment.md](./docs/remote-mcp-deployment.md) — remote
-  MCP topologies, Streamable HTTP and public OAuth deployment
-- [openspec/specs/](./openspec/specs/) — capability specifications
-  ([mcp-domain-tools](./openspec/specs/mcp-domain-tools/spec.md),
-  [e2e-tracer-suite](./openspec/specs/e2e-tracer-suite/spec.md))
+- [docs/remote-mcp-deployment.md](docs/remote-mcp-deployment.md) — remote
+  MCP topologies and public OAuth deployment
+- [openspec/specs/](openspec/specs/) — capability specifications
 
 ## Contributing
 
 Open an issue first with your use case, the expected memory behavior, and
-your constraints (scale, latency, security). Keep commits conventional;
-one issue per PR.
+your constraints. Keep commits conventional; one issue per PR.
 
 ## License
 
-MIT (see the `license` field in [package.json](./package.json)).
+MIT (see the `license` field in [package.json](package.json)).
