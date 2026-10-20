@@ -21,7 +21,8 @@ where the MCP server runs and how it is authenticated.
 ![Local stdio deployment](assets/deployment-stdio.png)
 
 The MCP server runs as a child process on the agent's host — no
-authentication, because it is local — and points `AMS_API_URL` /
+authentication, so this shape is only for agents and upstreams running on
+the same host under your responsibility — and points `AMS_API_URL` /
 `AMS_QMD_URL` at the vault host.
 
 ### Remote HTTP deployment
@@ -83,9 +84,14 @@ Asymmetry to remember: `get_memory` needs the **docid** returned by
 1. **Host local / stdio**: the MCP server is spawned as a child process by the
    client (`packages/mcp/dist/bin.js`) and points `AMS_API_URL` /
    `AMS_QMD_URL` at the host. No auth — the process is local, and the
-   upstreams sit on loopback or a private network.
-2. **Private network**: `POST http://<private-host>:3111/mcp` with a static
-   bearer token (`AMS_MCP_TOKEN`).
+   upstreams sit on loopback or a private network. No security boundary of
+   any kind exists in this shape: use it only when the agent, the Write API
+   and QMD run on the same host under your own responsibility — anything
+   that crosses a network belongs on the HTTP paths below.
+2. **Private network**: for use under a private network you control —
+   `POST http://<private-host>:3111/mcp` with a static bearer token
+   (`AMS_MCP_TOKEN`). The token is the minimum boundary: never expose this
+   path beyond the private network.
 3. **Public**: `https://mcp.example.com/mcp` → TLS edge → OAuth 2.1 RS256 JWT
    (issuer `https://<tenant>.auth0.com/`, audience
    `https://mcp.example.com/mcp`, remote JWKS validation). The static token
@@ -133,9 +139,9 @@ runbooks live in
 
 | Port | Serves | Example exposure |
 |---|---|---|
-| 3000 | Write API (Hono) | `<tailnet-ip>:3050` → 3000 (private network only) |
-| 8181 | QMD daemon (search) | `<tailnet-ip>:8182` → 8181 (private network) |
-| 3111 | MCP Streamable HTTP | `<tailnet-ip>:3111` (private) + `https://mcp.example.com` (public, via tunnel) |
+| 3000 | Write API (Hono) | `<private-ip>:3050` → 3000 (private network only) |
+| 8181 | QMD daemon (search) | `<private-ip>:8182` → 8181 (private network) |
+| 3111 | MCP Streamable HTTP | `<private-ip>:3111` (private) + `https://mcp.example.com` (public, via tunnel) |
 
 ## Operational caveats
 

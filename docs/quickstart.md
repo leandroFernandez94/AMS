@@ -116,6 +116,9 @@ Then search from your connected MCP client (next step):
 }
 ```
 
+*stdio has no authentication — use it only when everything runs on the same
+host you control; see the security note in the [README](../README.md).*
+
 ### Streamable HTTP (shared service)
 
 Start the HTTP entrypoint (token must match the

@@ -82,6 +82,13 @@ config:
 }
 ```
 
+> **Security note:** the stdio server has no authentication of any kind —
+> the agent and everything it talks to run under your own responsibility.
+> Use it only when the agent, the Write API and QMD run on the same host
+> you control (`localhost` or local containers). For anything that crosses
+> a network, use the HTTP server: bearer token on a private network, or
+> OAuth for public exposure.
+
 For the from-source walkthrough (no Docker) see
 [docs/quickstart.md](docs/quickstart.md); for network exposure and public
 OAuth deployments see
@@ -100,7 +107,8 @@ OAuth deployments see
 ![Local stdio deployment](docs/assets/deployment-stdio.png)
 
 The MCP server runs as a child process on the agent's host — no
-authentication, because it is local — and points `AMS_API_URL` /
+authentication, so this shape is only for agents and upstreams running on
+the same host under your responsibility — and points `AMS_API_URL` /
 `AMS_QMD_URL` at the machine hosting the vault.
 
 ### Remote HTTP deployment

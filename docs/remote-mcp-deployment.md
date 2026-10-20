@@ -22,26 +22,25 @@ per-call.
 
 Hard constraint (from #27): the vault, Write API and QMD daemon stay on the
 current self-hosted server. A remote MCP deployment would reach those
-upstreams over the tailnet.
+upstreams over the private network.
 
-### Verified current deployment
+### Verified client configuration
 
-The primary client (OpenCode on the dev server) already runs the topology
-labelled "topology 2" below:
+A local agent on a private-network host runs the topology labelled
+"topology 2" below:
 
 ```json
 "ams": {
   "command": ["node", "/path/to/ams/packages/mcp/dist/bin.js"],
   "environment": {
-    "AMS_API_URL": "http://<tailnet-ip>:3050",
-    "AMS_QMD_URL": "http://<tailnet-ip>:8182"
+    "AMS_API_URL": "http://<private-ip>:3050",
+    "AMS_QMD_URL": "http://<private-ip>:8182"
   }
 }
 ```
 
-`100.64.x.x` is Tailscale's CGNAT range — both upstreams are reached over the
-tailnet today, and the MCP process runs on the agent host. This is not a
-hypothetical topology; it is the running baseline.
+Both upstreams are reached over the private network, and the MCP process
+runs on the agent host.
 
 Architectural fact that shapes everything below: `createServer()` is
 transport-agnostic (transport wiring lives entirely in the 15-line `bin.ts`),
@@ -113,17 +112,17 @@ process run, and what stands between the agent and the vault?** The vault
 box (Write API, QMD daemon, vault) is identical and never moves — only the
 left side changes.
 
-Legend: `─▶` network hop (needs the tailnet up) · `◁▷` local pipe/process
+Legend: `─▶` network hop (needs the private network up) · `◁▷` local pipe/process
 boundary (no network) · 🔒 point where a token/auth is required.
 
 ### Topology 1 — Network-facing MCP (Streamable HTTP) on a remote host
 
-The MCP server becomes a long-lived HTTP service on the tailnet; agents
-connect with a URL (+ token) instead of spawning a local process.
+The MCP server becomes a long-lived HTTP service on the private network;
+agents connect with a URL (+ token) instead of spawning a local process.
 
 ```mermaid
 flowchart LR
-    subgraph agents["Agent host(s) — any tailnet machine"]
+    subgraph agents["Agent host(s) — any machine on the private network"]
         client["MCP client (OpenCode, Claude Code, …)"]
     end
     subgraph mcphost["NEW remote MCP host"]
@@ -136,8 +135,8 @@ flowchart LR
     end
 
     client -- "Streamable HTTP · 🔒 token" --> mcp
-    mcp -- "HTTP · tailnet" --> api
-    mcp -- "HTTP · tailnet" --> qmd
+    mcp -- "HTTP · private network" --> api
+    mcp -- "HTTP · private network" --> qmd
     api --> vault
 ```
 
@@ -151,14 +150,15 @@ up for everyone.
 - **Cons**: requires auth on the MCP service itself (new secret, new
   rotation); session/lifecycle management even in stateless mode (health
   checks, restarts, idle behavior); adds a network hop between agent and
-  upstreams (agent → MCP host → tailnet → API/QMD) which increases failure
-  modes exactly where the issue worries about tailnet outages; every client
+  upstreams (agent → MCP host → private network → API/QMD) which increases
+  failure modes exactly where the issue worries about private-network
+  outages; every client
   must support HTTP transports (nearly true, not universally true).
 
-### Topology 2 — stdio MCP on the agent host, upstreams over the tailnet (CURRENT)
+### Topology 2 — stdio MCP on the agent host, upstreams over the private network
 
 The MCP process runs wherever the agent runs; `AMS_API_URL`/`AMS_QMD_URL`
-point at tailnet addresses of the self-hosted server.
+point at private-network addresses of the self-hosted server.
 
 ```mermaid
 flowchart LR
@@ -173,18 +173,18 @@ flowchart LR
         vault[("Vault")]
     end
 
-    mcp -- "HTTP · tailnet · no auth" --> api
-    mcp -- "HTTP · tailnet · no auth" --> qmd
+    mcp -- "HTTP · private network · no auth" --> api
+    mcp -- "HTTP · private network · no auth" --> qmd
     api --> vault
 ```
 
 One network leg per call. The MCP process is not network-facing at all — it
 is spawned by the agent and talks to its client over a local pipe — so the
-tailnet is the only boundary and no token exists to leak or rotate.
+private network is the only boundary and no token exists to leak or rotate.
 
-- **Pros**: zero code changes (this is today's `bin.ts`); zero auth surface on
-  the MCP side (the tailnet is the boundary — traffic never leaves the
-  private network); one fewer network hop; stdio compatibility everywhere;
+- **Pros**: zero code changes (the existing `bin.ts`); zero auth surface on
+  the MCP side (the private network is the boundary — traffic never leaves
+  it); one fewer network hop; stdio compatibility everywhere;
   per-agent isolation (one hung MCP process cannot affect other agents).
 - **Cons**: every agent host needs the MCP artifact (checkout build or image
   pull) plus per-host env config; one process per agent session; upgrading the
@@ -214,8 +214,8 @@ flowchart LR
     end
 
     client -- "HTTP · 🔒 token" --> gateway
-    mcp1 -- "HTTP · tailnet" --> api
-    mcpN -- "HTTP · tailnet" --> qmd
+    mcp1 -- "HTTP · private network" --> api
+    mcpN -- "HTTP · private network" --> qmd
 ```
 
 Same two network legs as topology 1 plus a translation layer: the gateway
@@ -231,10 +231,10 @@ component to operate with nothing to fan out to.
 
 ## Comparison
 
-| Dimension             | 1: Streamable HTTP | 2: stdio + tailnet (current) | 3: Gateway |
-| --------------------- | ------------------ | ---------------------------- | ---------- |
+| Dimension             | 1: Streamable HTTP | 2: stdio + private network   | 3: Gateway |
+| --------------------- | ------------------ | ----------------------------- | ---------- |
 | Code changes          | Add transport+auth | None                         | New service |
-| Auth surface          | Token required     | Tailnet boundary only        | Token required |
+| Auth surface          | Token required     | Private-network boundary only | Token required |
 | Network hops          | +1 (via MCP host)  | Direct                       | +1 |
 | Client compatibility  | Broad, not total   | Universal                    | Broad, not total |
 | Ops burden            | Service to run     | Artifact per agent host      | Service + fleet |
@@ -244,10 +244,11 @@ component to operate with nothing to fan out to.
 
 For a single-user deployment, phased:
 
-- **Phase 1 (tailnet-only service)**: tailnet reachability is the primary
-  boundary; the static bearer token is defense in depth (a compromised
-  tailnet peer or a misconfigured funnel must not get free write access to
-  the memory vault). The MCP listens on the tailnet interface only.
+- **Phase 1 (private-network-only service)**: private-network reachability is
+  the primary boundary; the static bearer token is defense in depth (a
+  compromised host on the private network or a misconfigured public tunnel
+  must not get free write access to the memory vault). The MCP listens on
+  the private network interface only.
 - **Phase 2 (public exposure)**: the bar rises. The token alone is NOT an
   acceptable boundary between the public internet and vault writes — it must
   be OAuth 2.1 (the SDK's resource-server machinery with RFC 9728 metadata)
@@ -256,9 +257,10 @@ For a single-user deployment, phased:
   Auth0, implemented with Hono + `jose`; Cloudflare Access rejected on
   vendor evidence — see the
   [Phase 2 runbook](#phase-2-runbook-public-oauth-exposure).)*
-- Upstream traffic (MCP → API/QMD) stays plain HTTP *inside* the tailnet;
-  WireGuard encryption covers the transport. No TLS work needed for upstream
-  legs even in phase 2 — only the public MCP edge needs HTTPS.
+- Upstream traffic (MCP → API/QMD) stays plain HTTP *inside* the private
+  network — if the network itself encrypts the transport (WireGuard, a VPN
+  overlay, etc.), no TLS is needed for upstream legs even in phase 2; only
+  the public MCP edge needs HTTPS.
 
 ## Operational concerns (apply to any remote variant)
 
@@ -267,9 +269,9 @@ For a single-user deployment, phased:
 - **Config**: env-based as today (`AMS_API_URL`, `AMS_QMD_URL`); resolved
   lazily, so an unreachable upstream degrades per tool call — the server must
   keep starting and answer with tool-level errors, never crash at boot.
-- **Failure modes**: tailnet link down → fetch timeouts per call; API down →
-  write tools fail, read tools (QMD) may still work; QMD down → inverse.
-  Health checks should probe the upstreams, not just the process.
+- **Failure modes**: private-network link down → fetch timeouts per call;
+  API down → write tools fail, read tools (QMD) may still work; QMD down →
+  inverse. Health checks should probe the upstreams, not just the process.
 - **Upgrades**: topology 2 upgrades are per-agent-host (pull + restart agent);
   topology 1 upgrades are one service restart shared by everyone.
 
@@ -297,22 +299,23 @@ in exchange for centralized deploys and client portability.
 **The MCP service does not need new hardware — it deploys on the existing
 self-hosted server** (one more service in the compose stack, image from
 ghcr.io). This is strictly better than a separate MCP host: MCP → upstream
-calls become localhost/container-network round-trips (the tailnet-link
-failure mode between MCP and upstreams disappears), and there is one box to
-operate. The original "separate host" framing in #27 is satisfied by a
-separate *service*, not a separate machine.
+calls become localhost/container-network round-trips (the private-network
+link failure mode between MCP and upstreams disappears), and there is one
+box to operate. The original "separate host" framing in #27 is satisfied by
+a separate *service*, not a separate machine.
 
-- **Phase 1 — tailnet service (#37)**: MCP as a long-lived HTTP service on
-  the existing server, reachable at its tailnet address. Stateless Streamable
-  HTTP behind a static bearer token (Hono `bearerAuth` — see the
-  [auth revision](#sdk-support-official-typescript-sdk)), upstreams at
-  localhost. Own agents (OpenCode on any tailnet host) switch from local
-  stdio to the remote URL. Deployment becomes one image update; no public
-  exposure. **Status: implemented on `feat/mcp-streamable-http` — see #37
-  and the [Phase 1 runbook](#phase-1-runbook-streamable-http).**
+- **Phase 1 — private-network service (#37)**: MCP as a long-lived HTTP
+  service on the existing server, reachable at its private-network address.
+  Stateless Streamable HTTP behind a static bearer token (Hono `bearerAuth`
+  — see the [auth revision](#sdk-support-official-typescript-sdk)),
+  upstreams at localhost. Own agents (OpenCode on any host on the private
+  network) switch from local stdio to the remote URL. Deployment becomes one
+  image update; no public exposure. **Status: implemented on
+  `feat/mcp-streamable-http` — see #37 and the
+  [Phase 1 runbook](#phase-1-runbook-streamable-http).**
 - **Phase 2 — public reachability for external apps (#39)**: Claude app /
-  ChatGPT clients run on vendor clouds and cannot reach a tailnet-only
-  service. The existing cloudflared tunnel on the same server fronts the MCP
+  ChatGPT clients run on vendor clouds and cannot reach a
+  private-network-only service. The existing cloudflared tunnel on the same server fronts the MCP
   with public HTTPS (origin at localhost) AND a real auth upgrade (OAuth 2.1
   resource server, or tunnel-fronted Cloudflare Access) — a static token
   alone is not an acceptable boundary between the public internet and write
@@ -320,8 +323,8 @@ separate *service*, not a separate machine.
   see #39 and the
   [Phase 2 runbook](#phase-2-runbook-public-oauth-exposure).**
 
-Topology 2 remains the running baseline until the phases merge and deploy:
-phase 1 (#37) is implemented on `feat/mcp-streamable-http` and phase 2 (#39)
+Topology 2 is the zero-setup baseline; phase 1 (#37) is implemented on
+`feat/mcp-streamable-http` and phase 2 (#39)
 on `feat/mcp-public-oauth` — see the runbooks below. Topology 3 stays
 rejected (one server, one user — nothing to fan out).
 
@@ -330,8 +333,8 @@ rejected (one server, one user — nothing to fan out).
 | Question     | Answer                                                  |
 | ------------ | ------------------------------------------------------- |
 | Transport    | Stateless Streamable HTTP (target); stdio stays as migration fallback |
-| Auth         | Phase 1: static bearer token, tailnet-only. Phase 2: OAuth 2.1 / tunnel-fronted access for public |
-| Network      | MCP runs on the existing self-hosted server: own agents reach it via tailnet (phase 1), external apps via cloudflared public HTTPS (phase 2). Upstreams stay localhost. Vault/API/QMD never move |
+| Auth         | Phase 1: static bearer token, private-network-only. Phase 2: OAuth 2.1 / tunnel-fronted access for public |
+| Network      | MCP runs on the existing self-hosted server: own agents reach it over the private network (phase 1), external apps via cloudflared public HTTPS (phase 2). Upstreams stay localhost. Vault/API/QMD never move |
 
 ## Phase 1 runbook (Streamable HTTP)
 
@@ -448,7 +451,7 @@ services:
       AMS_API_URL: "http://ams:3000" # existing Write API service (adjust name)
       AMS_QMD_URL: "http://ams:8181" # existing QMD daemon (adjust name)
     ports:
-      - "<tailnet-ip>:3111:3111" # publish on the tailnet interface ONLY
+      - "<private-ip>:3111:3111" # publish on the private network interface ONLY
     healthcheck:
       # the image's built-in HEALTHCHECK probes the Write API, not this
       # service — this service needs its own stanza
@@ -466,13 +469,14 @@ Notes:
   treats the `503` degraded response as failure — an unreachable upstream
   marks the container unhealthy while the process keeps running. Treat
   unhealthy as "investigate upstreams", not "restart the service".
-- The port mapping publishes on the host's tailnet address
-  (`<tailnet-ip>` here — adjust to your host); nothing listens on the LAN or
+- The port mapping publishes on the host's private network address
+  (`<private-ip>` here — adjust to your host); nothing listens on the LAN or
   public interfaces.
 
-> **Tailnet-only in phase 1.** The static token is defense in depth (see
-> [Security model](#security-model)) — the tailnet is the boundary. Do NOT
-> publish `AMS_MCP_PORT` on a public interface or through a public tunnel.
+> **Private-network-only in phase 1.** The static token is defense in depth
+> (see [Security model](#security-model)) — the private network is the
+> boundary. Do NOT publish `AMS_MCP_PORT` on a public interface or through a
+> public tunnel.
 > Public exposure is phase 2 (#39), now implemented — follow the
 > [Phase 2 runbook](#phase-2-runbook-public-oauth-exposure) (OAuth 2.1;
 > Cloudflare Access was rejected on vendor evidence).
@@ -480,9 +484,9 @@ Notes:
 ## Phase 2 runbook (public OAuth exposure)
 
 Implemented on `feat/mcp-public-oauth` (see #39); not yet merged or deployed.
-This runbook turns the phase-1 tailnet service into a publicly reachable
-OAuth 2.1 resource server for vendor-cloud clients (Claude app custom
-connectors, ChatGPT connectors). Phase 1 is untouched: with the OAuth
+This runbook turns the phase-1 private-network service into a publicly
+reachable OAuth 2.1 resource server for vendor-cloud clients (Claude app
+custom connectors, ChatGPT connectors). Phase 1 is untouched: with the OAuth
 variables unset, the service behaves exactly as documented above.
 
 What phase 2 adds, in one paragraph: Auth0 becomes the authorization server
@@ -531,7 +535,7 @@ share one service:
 
 | Population | Path | Credential |
 | --- | --- | --- |
-| Own agents (OpenCode, phase 1) | `http://<tailnet-ip>:3111/mcp` (tailnet, direct) | Static bearer token |
+| Own agents (OpenCode, phase 1) | `http://<private-ip>:3111/mcp` (private network, direct) | Static bearer token |
 | Public connectors (phase 2) | `https://mcp.example.com/mcp` (edge → tunnel) | Auth0-issued JWT (RS256) |
 
 The upstream legs do not change: MCP → Write API / QMD stays plain HTTP on
@@ -808,12 +812,12 @@ what makes the edge rule below apply to the tunnel hostname.
 > **Network reachability.** `ams-mcp:3111` resolves only when cloudflared
 > shares the AMS compose network. If cloudflared runs elsewhere (host-level
 > or in its own stack), point the service URL at the phase-1 published
-> tailnet address instead: `http://<tailnet-ip>:3111`.
+> private-network address instead: `http://<private-ip>:3111`.
 
 ### Cloudflare edge rate limiting
 
 The edge rule is the PRIMARY abuse control; the in-app limiter is defense in
-depth that bounds what a tunnel bypass (direct tailnet hit) can do
+depth that bounds what a tunnel bypass (direct private-network hit) can do
 (decision 7). Verified against Cloudflare's WAF docs (retrieved 2026-10-17):
 
 1. Cloudflare dashboard > **Security > WAF > Rate limiting rules** >
@@ -852,21 +856,21 @@ exists as the second layer.
 > **CF-Connecting-IP trust assumption (from the phase-2 verification).** On
 > the public path the Cloudflare edge owns and overwrites the
 > `CF-Connecting-IP` header, so the in-app limiter's per-client keys are
-> trustworthy there. A DIRECT hit on the tailnet port can spoof that header
-> and evade per-client limiting. Accepted: the tailnet is the trusted
-> perimeter, static-token/JWT auth still applies on every request, and the
-> edge rule is the primary control.
+> trustworthy there. A DIRECT hit on the private-network port can spoof that
+> header and evade per-client limiting. Accepted: the private network is the
+> trusted perimeter, static-token/JWT auth still applies on every request,
+> and the edge rule is the primary control.
 
-- **Why the static token stays.** Phase-1 tailnet clients (OpenCode and any
-  other agent configured with URL + token) keep working unchanged. The
+- **Why the static token stays.** Phase-1 private-network clients (OpenCode
+  and any other agent configured with URL + token) keep working unchanged. The
   token is checked first, timing-safe, with no network I/O; JWT
   verification only runs when it does not match. Removing it would break
-  phase 1 for no security gain — inside the tailnet the token remains
-  defense in depth, and OAuth fronts the public path.
+  phase 1 for no security gain — inside the private network the token
+  remains defense in depth, and OAuth fronts the public path.
 - **Write tools stay behind auth on every path.** Every vault write goes
   through MCP tools, and the tool endpoint (`POST /mcp`) is gated by the
-  dual-credential check on both the tailnet and public routes — there is no
-  unauthenticated write surface. `/health` reports upstream reachability
+  dual-credential check on both the private-network and public routes —
+  there is no unauthenticated write surface. `/health` reports upstream reachability
   only, never note content, and the metadata route is static JSON.
 - **Token validation posture.** RS256 is pinned (rejects `alg:none` and
   HMAC-confusion), `iss`/`aud` compare literally, `exp` is required, clock
@@ -881,14 +885,14 @@ exists as the second layer.
 
 ### Credential rotation
 
-**Rotate `AMS_MCP_TOKEN`** (static token — tailnet clients):
+**Rotate `AMS_MCP_TOKEN`** (static token — private-network clients):
 
 1. Generate: `openssl rand -base64 32` (charset-safe; see the phase-1 note).
 2. Update the environment (`.env` / compose) and restart the service
-   (`docker compose up -d ams-mcp`). Expect a brief 401 window for tailnet
-   clients.
-3. Update every tailnet client's `Authorization: Bearer` header. Public
-   connectors are unaffected — the JWT path never reads this token.
+   (`docker compose up -d ams-mcp`). Expect a brief 401 window for
+   private-network clients.
+3. Update every private-network client's `Authorization: Bearer` header.
+   Public connectors are unaffected — the JWT path never reads this token.
 
 **Rotate an Auth0 Application client secret** (one connector at a time):
 
