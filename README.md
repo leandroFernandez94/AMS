@@ -89,8 +89,8 @@ config:
 > a network, use the HTTP server: bearer token on a private network, or
 > OAuth for public exposure.
 
-For the from-source walkthrough (no Docker) see
-[docs/quickstart.md](docs/quickstart.md).
+All installation paths (Docker, Docker + local stdio, from source) are
+covered in [docs/quickstart.md](docs/quickstart.md).
 
 ## How AMS is organized
 
@@ -123,8 +123,8 @@ resource-server mode (RS256/JWKS) for public exposure.
   authentication, configuration, caveats
 - [docs/notes-processing.md](docs/notes-processing.md) — note anatomy and the
   write/update/delete lifecycle, locking, indexing
-- [docs/quickstart.md](docs/quickstart.md) — clone to working loop,
-  from source
+- [docs/quickstart.md](docs/quickstart.md) — installation paths (Docker,
+  hybrid, from source) and first run
 - [docs/e2e-runbook.md](docs/e2e-runbook.md) — end-to-end loop
   reproduction and troubleshooting
 - [docs/retrieval-runbook.md](docs/retrieval-runbook.md) — QMD daemon
