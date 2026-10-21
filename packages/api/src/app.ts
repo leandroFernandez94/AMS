@@ -1,7 +1,7 @@
 /**
  * HTTP application for the Write API.
  *
- * The semantic operations for the tracer bullet are `record_note`
+ * The semantic operations are `record_note`
  * (`POST /notes`) and note deletion (`DELETE /notes/:path`). Agents never
  * touch the filesystem directly — every mutation is validated, lock-protected
  * and flagged for the indexer.
@@ -43,7 +43,7 @@ export interface AppDeps {
   dirty: DirtyStore;
   logger: Logger;
   /**
-   * Optional so the tracer-bullet app can run without the scheduler wired
+   * Optional so the app can run without the scheduler wired
    * (e.g. the existing note-writing tests). When present it powers
    * `POST /admin/reindex`.
    */

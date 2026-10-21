@@ -1,75 +1,141 @@
-# Agents Memory System (AMS)
+# AMS — Agents Memory System
 
-AMS is a public, vendor-neutral project to build a shared memory architecture for AI agents using Markdown as the long-term source of truth.
+AMS gives AI agents a durable, shared memory built on plain Markdown files.
+An agent records what matters through a small set of MCP tools; every note
+lands as a `.md` file in a vault **you own**; a local hybrid search index
+makes those notes retrievable; and any agent — in the same session or a
+future one — reads them back. Because the memory is just files, there is no
+lock-in: read them with anything, back them up with anything, leave anytime
+with your data in hand.
 
-## Security and Portability First
+![AMS at a glance](docs/assets/overview.png)
 
-This repository is public. All examples and code must follow these constraints:
+AMS is live end to end: six MCP domain tools over stdio and
+Streamable HTTP, ~290 automated tests, and a CI-published Docker image.
 
-- no secrets or credentials in git history
-- no host-specific absolute paths (for example `/home/<user>/...`)
-- no assumptions about a single machine layout
-- all runtime configuration via environment variables
+## Quick start (Docker)
 
-See [SECURITY.md](./SECURITY.md) for disclosure and contributor rules.
+The fastest way to try AMS against a local vault is the published image,
+[`ghcr.io/leandrofernandez94/ams:latest`](https://github.com/leandroFernandez94/AMS/pkgs/container/ams).
+Save this as `compose.yaml` and run `docker compose up -d`:
 
-## Vision
+```yaml
+services:
+  ams:
+    image: ghcr.io/leandrofernandez94/ams:latest
+    ports:
+      - "3000:3000"   # Write API
+      - "8181:8181"   # QMD search daemon
+    volumes:
+      - ams-data:/data
+    restart: unless-stopped
 
-AMS separates memory concerns into two clear layers:
+  ams-mcp:
+    image: ghcr.io/leandrofernandez94/ams:latest
+    command: node packages/mcp/dist/http.js
+    environment:
+      AMS_MCP_TOKEN: "change-me"   # openssl rand -base64 32
+      AMS_MCP_HOST: "0.0.0.0"
+      AMS_API_URL: "http://ams:3000"
+      AMS_QMD_URL: "http://ams:8181"
+    ports:
+      - "3111:3111"   # MCP Streamable HTTP
+    restart: unless-stopped
 
-- **Retrieval layer**: optimized for search and read access
-- **Write layer**: optimized for controlled, semantically-safe updates
-
-This keeps knowledge durable for humans (plain Markdown) while enabling structured agent workflows.
-
-## High-Level Architecture
-
-```text
-Markdown Vault (source of truth)
-  <- Human client(s) for reading/review
-  <- Retrieval engine (index + search APIs)
-  <- Write service (controlled semantic operations)
-       <- MCP tools used by agents
+volumes:
+  ams-data:
 ```
 
-## Core Design Principles
+On first boot the `ams` container creates the vault, initializes the QMD
+registry and registers the vault as a collection — no manual setup. The first
+indexing cycle downloads a ~300MB embedding model (one time only; it stays
+cached in the `ams-data` volume).
 
-- **Markdown-first durability**: data remains usable without a proprietary backend.
-- **Read/Write separation**: retrieval and persistence are independent concerns.
-- **Semantic writes**: agents should call domain tools (e.g. record decision), not raw file writes.
-- **Conflict safety**: prefer append-only operations; use structured upserts for canonical notes.
+Smoke test the loop:
 
-## Retrieval
+```bash
+curl http://localhost:3000/health        # {"status":"ok"}
+```
 
-The read path integrates [QMD](https://github.com/tobi/qmd), a local hybrid
-search engine running as an independent HTTP daemon. AMS never builds its own
-retrieval index. See the [Retrieval Runbook](./docs/retrieval-runbook.md) for
-how to index the vault and run the daemon the `@ams/api` adapter connects to.
+Then point any MCP-capable client at `http://localhost:3111/mcp` with header
+`Authorization: Bearer change-me` and run the loop:
+`record_note` → force a reindex with
+`curl -X POST http://localhost:3000/admin/reindex` (or wait ~2 minutes for
+the scheduler) → `search_memory`.
 
-## Scope
+### Agents on your own machine (stdio, no token)
 
-This repository contains planning and implementation for two packages:
+The `ams` container does not run the stdio server — each local agent launches
+it next to itself. Clone and build once, then add this to any MCP client
+config:
 
-- `packages/mcp`: MCP server exposing high-level memory tools for agents
-- `packages/api`: HTTP service responsible for controlled persistence operations
+```json
+{
+  "ams": {
+    "command": "node",
+    "args": ["/path/to/ams/packages/mcp/dist/bin.js"],
+    "environment": {
+      "AMS_API_URL": "http://<docker-host>:3000",
+      "AMS_QMD_URL": "http://<docker-host>:8181"
+    }
+  }
+}
+```
 
-## What This README Intentionally Does Not Include
+> **Security note:** the stdio server has no authentication of any kind —
+> the agent and everything it talks to run under your own responsibility.
+> Use it only when the agent, the Write API and QMD run on the same host
+> you control (`localhost` or local containers). For anything that crosses
+> a network, use the HTTP server: bearer token on a private network, or
+> OAuth for public exposure.
 
-To keep the public surface secure and implementation-agnostic, this README omits:
+All installation paths (Docker, Docker + local stdio, from source) are
+covered in [docs/quickstart.md](docs/quickstart.md).
 
-- environment-specific infrastructure details
-- internal deployment topology
-- machine-specific paths and network assumptions
-- step-by-step operational rollout plans
+## How AMS is organized
 
-Detailed technical specs will be maintained as versioned artifacts in the repository (issues, ADRs, and spec docs).
+| Package | What it is |
+|---|---|
+| [`@ams/shared`](packages/shared) | Cross-package types and schemas — the note contract |
+| [`@ams/api`](packages/api) | Write API: validated note writes, locks, embedded index scheduler |
+| [`@ams/mcp`](packages/mcp) | MCP server with the six domain tools, over stdio and HTTP |
 
-## Current Status
+### Local stdio deployment
 
-Project is in early planning and specification phase.
+![Local stdio deployment](docs/assets/deployment-stdio.png)
 
-If you want to contribute early, open an issue with:
+The MCP server runs as a child process on the agent's host — no
+authentication, so this shape is only for agents and upstreams running on
+the same host under your responsibility — and points `AMS_API_URL` /
+`AMS_QMD_URL` at the machine hosting the vault.
 
-- use case
-- expected memory behavior
-- constraints (scale, latency, security)
+### Remote HTTP deployment
+
+![Remote HTTP deployment](docs/assets/deployment-http.png)
+
+The MCP server runs on the vault host as a stateless Streamable HTTP service
+(`POST /mcp`) gated by a static bearer token and, optionally, an OAuth 2.1
+resource-server mode (RS256/JWKS) for public exposure.
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — components, note contract,
+  authentication, configuration, caveats
+- [docs/notes-processing.md](docs/notes-processing.md) — note anatomy and the
+  write/update/delete lifecycle, locking, indexing
+- [docs/quickstart.md](docs/quickstart.md) — installation paths (Docker,
+  hybrid, from source) and first run
+- [docs/e2e-runbook.md](docs/e2e-runbook.md) — end-to-end loop
+  reproduction and troubleshooting
+- [docs/retrieval-runbook.md](docs/retrieval-runbook.md) — QMD daemon
+  operations
+- [openspec/specs/](openspec/specs/) — capability specifications
+
+## Contributing
+
+Open an issue first with your use case, the expected memory behavior, and
+your constraints. Keep commits conventional; one issue per PR.
+
+## License
+
+MIT (see the `license` field in [package.json](package.json)).

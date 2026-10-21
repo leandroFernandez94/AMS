@@ -22,8 +22,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 const execFileP = promisify(execFile);
 
-/** A fully booted tracer fixture with all resources needed for a test. */
-export interface TracerFixture {
+/** A fully booted e2e fixture with all resources needed for a test. */
+export interface E2eFixture {
   /** Temp fixture root — cwd for every spawned qmd process. */
   root: string;
   /** Vault directory served by the Write API (<root>/vault). */
@@ -325,11 +325,11 @@ async function waitForReachable(client: QmdClient, timeoutMs = 15_000): Promise<
 }
 
 /**
- * Creates a fully isolated tracer fixture:
+ * Creates a fully isolated e2e fixture:
  * temp vault → qmd init → collection add → Write API (port 0) → QMD daemon → MCP client.
  */
-export async function createTracerFixture(): Promise<TracerFixture> {
-  const root = await mkdtemp(join(tmpdir(), "ams-tracer-"));
+export async function createE2eFixture(): Promise<E2eFixture> {
+  const root = await mkdtemp(join(tmpdir(), "ams-e2e-"));
   const vaultPath = join(root, "vault");
   await mkdir(vaultPath);
 
@@ -370,7 +370,7 @@ export async function createTracerFixture(): Promise<TracerFixture> {
 
   const server = createMcpServer({ apiUrl, qmdClient });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const mcp = new Client({ name: "ams-tracer", version: "0.0.0" });
+  const mcp = new Client({ name: "ams-e2e", version: "0.0.0" });
   await server.connect(serverTransport);
   await mcp.connect(clientTransport);
 

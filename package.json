@@ -16,7 +16,7 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
-    "tracer": "node e2e/precheck.mjs && vitest run --config vitest.tracer.config.ts",
+    "e2e": "node e2e/precheck.mjs && vitest run --config vitest.e2e.config.ts",
     "prepare": "husky"
   },
   "devDependencies": {

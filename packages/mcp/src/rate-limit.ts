@@ -41,10 +41,10 @@ export interface RateLimiterOptions {
  *
  * `CF-Connecting-IP` wins because behind the cloudflared tunnel the socket
  * address is Cloudflare's edge, not the client's; only the tunnel sets that
- * header, so trusting it there is safe (decision 7). Direct-tailnet clients
- * fall back to the socket address exposed by the node-server adapter; when
- * no adapter supplied bindings (e.g. `app.request()` in tests) all callers
- * share the `unknown` key.
+ * header, so trusting it there is safe (decision 7). Direct
+ * private-network clients fall back to the socket address exposed by the
+ * node-server adapter; when no adapter supplied bindings (e.g.
+ * `app.request()` in tests) all callers share the `unknown` key.
  */
 function resolveClientKey(c: Context): string {
   const header = c.req.header(CF_CONNECTING_IP_HEADER);

@@ -1,6 +1,6 @@
 /**
- * Data contract for a generic note — the base note type of the tracer
- * bullet. Every other spec (Write API, MCP, QMD) reads and writes
+ * Data contract for a generic note — the base note type of AMS.
+ * Every other spec (Write API, MCP, QMD) reads and writes
  * against this contract.
  *
  * Design decisions (see issue #2):

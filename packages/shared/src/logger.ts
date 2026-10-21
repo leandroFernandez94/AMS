@@ -3,7 +3,7 @@
  *
  * Emits one JSON object per line to stdout so logs are trivially greppable
  * and consumable by log aggregators (Dozzle, Loki, etc.). Kept dependency-free
- * on purpose; the tracer bullet does not need a full logging framework.
+ * on purpose; AMS does not need a full logging framework yet.
  */
 
 export type LogLevel = "debug" | "info" | "warn" | "error";

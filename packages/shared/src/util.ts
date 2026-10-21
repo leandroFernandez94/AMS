@@ -1,6 +1,6 @@
 /**
  * Base utilities for the package. Kept minimal so we do not speculate
- * abstractions before the tracer bullet justifies them.
+ * abstractions before the current scope justifies them.
  */
 
 export const PACKAGE_NAME = "@ams/shared" as const;
