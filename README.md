@@ -129,6 +129,8 @@ resource-server mode (RS256/JWKS) for public exposure.
   reproduction and troubleshooting
 - [docs/retrieval-runbook.md](docs/retrieval-runbook.md) — QMD daemon
   operations
+- [docs/deployment/](docs/deployment/) — running the stack: full Docker
+  reference, remote MCP (token and OAuth 2.1)
 - [openspec/specs/](openspec/specs/) — capability specifications
 
 ## Contributing
@@ -138,4 +140,5 @@ your constraints. Keep commits conventional; one issue per PR.
 
 ## License
 
-MIT (see the `license` field in [package.json](package.json)).
+MIT — see [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md) for how to
+contribute.

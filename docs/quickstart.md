@@ -312,4 +312,6 @@ More: [architecture.md](architecture.md) (how the pieces fit),
 [notes-processing.md](notes-processing.md) (note anatomy and the
 write/update/delete lifecycle), [e2e-runbook.md](e2e-runbook.md) (loop
 reproduction and troubleshooting), [retrieval-runbook.md](retrieval-runbook.md)
-(QMD daemon operations).
+(QMD daemon operations), [deployment/docker.md](deployment/docker.md) (full
+Docker reference) and [deployment/mcp-remote.md](deployment/mcp-remote.md)
+(remote MCP exposure).
