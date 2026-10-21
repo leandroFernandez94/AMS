@@ -134,9 +134,6 @@ Point a remote-capable client at `http://127.0.0.1:3111/mcp` with an
 `Authorization: Bearer <token>` header. Unauthenticated health probe:
 `curl -s http://127.0.0.1:3111/health`.
 
-For private-network and public OAuth deployments, see
-[remote-mcp-deployment.md](remote-mcp-deployment.md).
-
 ## 8. Run the e2e suite
 
 ```bash

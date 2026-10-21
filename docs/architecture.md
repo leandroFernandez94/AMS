@@ -5,8 +5,7 @@ describes the system as built: components, the note contract, the
 authentication model, configuration, and operational caveats. The full note
 anatomy and processing lifecycle (write, update, delete, locking, indexing)
 live in [notes-processing.md](notes-processing.md). Deployment specifics live
-in [Example deployment](#example-deployment) (placeholder values only) and in
-[remote-mcp-deployment.md](remote-mcp-deployment.md).
+in [Example deployment](#example-deployment) (placeholder values only).
 
 Related docs: [notes-processing.md](notes-processing.md) (note anatomy and
 lifecycle), [e2e-runbook.md](e2e-runbook.md) (end-to-end loop),
@@ -101,9 +100,7 @@ endpoint (`/.well-known/oauth-protected-resource/mcp`) are unauthenticated.
 ## Example deployment
 
 A concrete but fully generic single-host deployment. Every identifier below is
-a placeholder — substitute your own values. The full HTTP + OAuth deployment
-runbooks live in
-[remote-mcp-deployment.md](remote-mcp-deployment.md).
+a placeholder — substitute your own values.
 
 - Two containers from one image, `ghcr.io/<owner>/ams:latest`, on a shared
   Docker network:

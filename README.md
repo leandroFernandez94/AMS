@@ -90,9 +90,7 @@ config:
 > OAuth for public exposure.
 
 For the from-source walkthrough (no Docker) see
-[docs/quickstart.md](docs/quickstart.md); for network exposure and public
-OAuth deployments see
-[docs/remote-mcp-deployment.md](docs/remote-mcp-deployment.md).
+[docs/quickstart.md](docs/quickstart.md).
 
 ## How AMS is organized
 
@@ -131,8 +129,6 @@ resource-server mode (RS256/JWKS) for public exposure.
   reproduction and troubleshooting
 - [docs/retrieval-runbook.md](docs/retrieval-runbook.md) — QMD daemon
   operations
-- [docs/remote-mcp-deployment.md](docs/remote-mcp-deployment.md) — remote
-  MCP topologies and public OAuth deployment
 - [openspec/specs/](openspec/specs/) — capability specifications
 
 ## Contributing
