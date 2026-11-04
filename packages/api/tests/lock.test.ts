@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WriteLock } from "../src/lock.js";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -77,5 +77,149 @@ describe("WriteLock", () => {
   it("rejects a non-positive TTL", () => {
     expect(() => new WriteLock(0)).toThrow(/positive number/);
     expect(() => new WriteLock(Number.NaN)).toThrow(/positive number/);
+  });
+});
+
+describe("WriteLock stale-release protection (issue #57)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Lets queued-promise continuations run without advancing virtual time. */
+  const flush = async () => {
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+  };
+
+  it("a stale release after TTL expiry does not free the next holder", async () => {
+    vi.useFakeTimers();
+    const ttl = 100;
+    const lock = new WriteLock(ttl);
+
+    const releaseA = await lock.acquire("k");
+    expect(lock.isLocked("k")).toBe(true);
+
+    // A never calls release(); the TTL escape hatch frees the key.
+    await vi.advanceTimersByTimeAsync(ttl);
+    expect(lock.isLocked("k")).toBe(false);
+
+    // B legitimately takes over the expired key.
+    const releaseB = await lock.acquire("k");
+    expect(lock.isLocked("k")).toBe(true);
+
+    // A's late release() must be a no-op: B still owns the key.
+    releaseA();
+    expect(lock.isLocked("k")).toBe(true);
+
+    // A fresh acquire must queue behind B, not take the fast path over the
+    // key A wrongly freed.
+    let acquired = false;
+    const pendingC = lock.acquire("k").then((release) => {
+      acquired = true;
+      return release;
+    });
+    await flush();
+    expect(acquired).toBe(false);
+
+    releaseB();
+    const releaseC = await pendingC;
+    expect(acquired).toBe(true);
+    releaseC();
+  });
+
+  it("a stale release does not wake the next waiter", async () => {
+    vi.useFakeTimers();
+    const ttl = 100;
+    const lock = new WriteLock(ttl);
+
+    const releaseA = await lock.acquire("k");
+    // B queues while A holds the key.
+    const pendingB = lock.acquire("k");
+    await flush();
+
+    // TTL fires: the handoff wakes B, which takes ownership.
+    await vi.advanceTimersByTimeAsync(ttl);
+    const releaseB = await pendingB;
+    expect(lock.isLocked("k")).toBe(true);
+
+    // C queues behind B.
+    let cAcquired = false;
+    const pendingC = lock.acquire("k").then((release) => {
+      cAcquired = true;
+      return release;
+    });
+    await flush();
+    expect(cAcquired).toBe(false);
+
+    // A's stale release must not resolve C early.
+    releaseA();
+    await flush();
+    expect(cAcquired).toBe(false);
+    expect(lock.isLocked("k")).toBe(true);
+
+    // B's genuine release is what wakes C.
+    releaseB();
+    const releaseC = await pendingC;
+    expect(cAcquired).toBe(true);
+    releaseC();
+  });
+
+  it("a repeated release from the same holder does not free the next holder", async () => {
+    vi.useFakeTimers();
+    const lock = new WriteLock(1000);
+
+    const releaseA = await lock.acquire("k");
+    releaseA();
+    releaseA(); // immediate double release — the second call must be inert
+    expect(lock.isLocked("k")).toBe(false);
+
+    const releaseB = await lock.acquire("k");
+    expect(lock.isLocked("k")).toBe(true);
+
+    // A's release function was already consumed; reusing it must not free
+    // B's lock.
+    releaseA();
+    expect(lock.isLocked("k")).toBe(true);
+
+    let acquired = false;
+    const pendingC = lock.acquire("k").then((release) => {
+      acquired = true;
+      return release;
+    });
+    await flush();
+    expect(acquired).toBe(false);
+
+    releaseB();
+    await pendingC;
+    expect(acquired).toBe(true);
+  });
+
+  it("re-arms the TTL per acquisition through a forced handoff", async () => {
+    vi.useFakeTimers();
+    const ttl = 100;
+    const lock = new WriteLock(ttl);
+
+    // A is intentionally leaked: only its TTL frees the key for B.
+    await lock.acquire("k");
+    const pendingB = lock.acquire("k");
+    await flush();
+
+    // TTL expiry hands the key to the queued waiter B.
+    await vi.advanceTimersByTimeAsync(ttl);
+    // B is leaked too — its own TTL must free the key below.
+    await pendingB;
+    expect(lock.isLocked("k")).toBe(true);
+
+    // B's acquisition armed a fresh TTL; A's already-fired timer must not
+    // free B's key early, and B's own expiry eventually does.
+    await vi.advanceTimersByTimeAsync(ttl - 1);
+    expect(lock.isLocked("k")).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lock.isLocked("k")).toBe(false);
+
+    // The key is fully free again: a new acquire resolves immediately.
+    const releaseC = await lock.acquire("k");
+    expect(lock.isLocked("k")).toBe(true);
+    releaseC();
   });
 });
