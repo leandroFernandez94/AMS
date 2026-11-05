@@ -15,6 +15,10 @@
  *    starve under sustained load.
  *  - Each acquisition arms a fresh TTL timer. Releasing clears it. The TTL
  *    is a last-resort escape hatch, not the normal release path.
+ *  - Per-acquisition ownership tokens: a holder whose TTL already expired
+ *    (or a stale/duplicated release callback) must not free the NEXT
+ *    holder's lock or wake extra waiters. A release only takes effect
+ *    while its acquisition is still the current owner of the key.
  */
 
 /** Function returned by `acquire()`; calling it releases the held lock. */
@@ -28,6 +32,8 @@ export class WriteLock {
   private readonly locked = new Set<string>();
   private readonly waiters = new Map<string, Waiter[]>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Current ownership token per key; identity is unique per acquisition. */
+  private readonly owners = new Map<string, object>();
   private readonly ttlMs: number;
 
   constructor(ttlMs: number) {
@@ -44,8 +50,8 @@ export class WriteLock {
    */
   async acquire(key: string): Promise<ReleaseFunction> {
     if (!this.locked.has(key)) {
-      this.takeOwnership(key);
-      return () => this.release(key);
+      const token = this.takeOwnership(key);
+      return () => this.release(key, token);
     }
     // Already held — queue behind current waiters for FIFO fairness.
     await new Promise<void>((resolve) => {
@@ -54,8 +60,8 @@ export class WriteLock {
       this.waiters.set(key, queue);
     });
     // When the promise above resolves the key is OURS to take.
-    this.takeOwnership(key);
-    return () => this.release(key);
+    const token = this.takeOwnership(key);
+    return () => this.release(key, token);
   }
 
   /** Whether `key` is currently held. Mainly for tests and diagnostics. */
@@ -63,16 +69,26 @@ export class WriteLock {
     return this.locked.has(key);
   }
 
-  private takeOwnership(key: string): void {
+  private takeOwnership(key: string): object {
     this.locked.add(key);
+    // Unique object identity per acquisition: the proof a later release()
+    // must present, so a stale holder cannot act on someone else's lock.
+    const token: object = {};
+    this.owners.set(key, token);
     const timer = setTimeout(() => this.forceRelease(key, "ttl"), this.ttlMs);
     // Don't keep the event loop alive solely for the lock timer.
     timer.unref?.();
     this.timers.set(key, timer);
+    return token;
   }
 
-  private release(key: string): void {
-    if (!this.locked.delete(key)) return;
+  private release(key: string, token: object): void {
+    // Stale or duplicated release: ownership already moved on (TTL handoff
+    // or a newer holder), so freeing the key here would admit two writers
+    // to the critical section at once. No-op instead.
+    if (this.owners.get(key) !== token) return;
+    this.owners.delete(key);
+    this.locked.delete(key);
     this.clearTimer(key);
     this.wakeNext(key);
   }
@@ -80,6 +96,9 @@ export class WriteLock {
   /** TTL expiry or forced release: ownership drops without clearing a timer. */
   private forceRelease(key: string, reason: string): void {
     if (!this.locked.delete(key)) return;
+    // Drop the token too, so the expired holder's late release() can never
+    // match again and free a key a newer holder now owns.
+    this.owners.delete(key);
     this.timers.delete(key);
     void reason;
     this.wakeNext(key);
