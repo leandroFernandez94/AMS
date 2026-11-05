@@ -17,8 +17,8 @@
  *    is a last-resort escape hatch, not the normal release path.
  *  - Per-acquisition ownership tokens: a holder whose TTL already expired
  *    (or a stale/duplicated release callback) must not free the NEXT
- *    holder's lock or wake extra waiters (issue #57). A release only takes
- *    effect while its acquisition is still the current owner of the key.
+ *    holder's lock or wake extra waiters. A release only takes effect
+ *    while its acquisition is still the current owner of the key.
  */
 
 /** Function returned by `acquire()`; calling it releases the held lock. */
@@ -85,7 +85,7 @@ export class WriteLock {
   private release(key: string, token: object): void {
     // Stale or duplicated release: ownership already moved on (TTL handoff
     // or a newer holder), so freeing the key here would admit two writers
-    // to the critical section at once (issue #57). No-op instead.
+    // to the critical section at once. No-op instead.
     if (this.owners.get(key) !== token) return;
     this.owners.delete(key);
     this.locked.delete(key);

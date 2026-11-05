@@ -80,7 +80,7 @@ describe("WriteLock", () => {
   });
 });
 
-describe("WriteLock stale-release protection (issue #57)", () => {
+describe("WriteLock stale-release protection", () => {
   afterEach(() => {
     vi.useRealTimers();
   });

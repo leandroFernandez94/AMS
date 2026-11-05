@@ -7,7 +7,7 @@ import { type ServerType, serve } from "@hono/node-server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
- * End-to-end stress for the WriteLock stale-release fix (issue #57).
+ * End-to-end stress for the WriteLock stale-release fix.
  *
  * The app runs in-process with a deliberately tiny lock TTL so expiries fire
  * while requests still queue for and hold the path locks. Under that pressure
@@ -142,7 +142,7 @@ async function settleToSingleNote(vaultPath: string, topicKey: string): Promise<
   return scan;
 }
 
-describe("write-lock TTL stress (issue #57)", () => {
+describe("write-lock TTL stress", () => {
   let harness: StressHarness;
 
   beforeAll(async () => {
